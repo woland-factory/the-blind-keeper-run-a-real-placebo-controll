@@ -1,0 +1,64 @@
+name: the-blind-keeper-run-a-real-placebo-controll-staging
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: the-blind-keeper-run-a-real-placebo-controll-staging-web
+    expose:
+      - "80"
+    environment:
+      NODE_ENV: production
+      PORT: "80"
+      DATABASE_URL: postgres://blindkeeper:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/blindkeeper
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost}
+      SESSION_COOKIE_SECRET: ${SESSION_COOKIE_SECRET:?set SESSION_COOKIE_SECRET}
+      # Console transport on staging: the demo sign-in link prints to the app
+      # logs so a reviewer can enter the demo account without a real mailbox.
+      MAIL_TRANSPORT: console
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SEED_DEMO: "1"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - default
+      - staging
+    mem_limit: 512m
+    oom_score_adj: 800
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - node -e "fetch('http://localhost:80/api/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: blindkeeper
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: blindkeeper
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks:
+      - default
+    mem_limit: 256m
+    oom_score_adj: 800
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U blindkeeper -d blindkeeper"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  db-data:
+
+networks:
+  staging:
+    external: true
+    name: factory-staging-net

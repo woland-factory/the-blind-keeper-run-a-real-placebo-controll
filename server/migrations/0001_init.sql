@@ -1,4 +1,4 @@
--- 0001_init.sql — core schema for blind-keeper.
+-- 0001_init.sql: core schema for blind-keeper.
 -- Forward-only. Never edit an applied migration; add a new one.
 
 CREATE EXTENSION IF NOT EXISTS citext;
