@@ -33,3 +33,23 @@ export function extractSessionCookie(setCookie: string | string[] | undefined): 
   const found = list.find((c) => c.startsWith("bk_session="));
   return found?.split(";")[0];
 }
+
+/**
+ * Sign a fresh user in through the real magic-link flow (console transport) and
+ * return the session cookie for authenticated requests.
+ */
+export async function signIn(app: FastifyInstance, email: string): Promise<string> {
+  await app.inject({ method: "POST", url: "/api/auth/magic-link", payload: { email } });
+  const link = (
+    await app.inject({
+      method: "GET",
+      url: `/api/dev/last-magic-link?email=${encodeURIComponent(email)}`,
+    })
+  ).json().link as string;
+  const token = new URL(link).searchParams.get("token")!;
+  const verify = await app.inject({
+    method: "GET",
+    url: `/api/auth/verify?token=${encodeURIComponent(token)}`,
+  });
+  return extractSessionCookie(verify.headers["set-cookie"])!;
+}

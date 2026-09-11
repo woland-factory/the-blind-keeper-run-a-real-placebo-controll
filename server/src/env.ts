@@ -22,6 +22,7 @@ const schema = z.object({
   SEED_DEMO: boolish,
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(5),
+  MUTATION_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(20),
   E2E_EXPOSE_MAGIC_LINK: boolish,
 });
 
