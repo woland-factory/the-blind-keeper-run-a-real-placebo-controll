@@ -4,6 +4,95 @@ export function Page({ children }: { children: ReactNode }) {
   return <main className="page">{children}</main>;
 }
 
+/** A number stepper with large, keyboard-reachable controls. */
+export function Stepper({
+  label,
+  value,
+  min,
+  max,
+  suffix,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  suffix?: string;
+  onChange: (next: number) => void;
+}) {
+  const clamp = (n: number) => Math.max(min, Math.min(max, n));
+  return (
+    <div className="field">
+      <span className="field-label" id={`${label}-label`}>
+        {label}
+      </span>
+      <div className="stepper" role="group" aria-labelledby={`${label}-label`}>
+        <button
+          type="button"
+          className="stepper-btn"
+          onClick={() => onChange(clamp(value - 1))}
+          disabled={value <= min}
+          aria-label={`Fewer ${label}`}
+        >
+          −
+        </button>
+        <span className="stepper-value" aria-live="polite">
+          {value}
+          {suffix ? ` ${suffix}` : ""}
+        </span>
+        <button
+          type="button"
+          className="stepper-btn"
+          onClick={() => onChange(clamp(value + 1))}
+          disabled={value >= max}
+          aria-label={`More ${label}`}
+        >
+          +
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export interface Option<T extends string | number> {
+  value: T;
+  label: string;
+}
+
+/** A segmented control: a labeled set of mutually exclusive choices. */
+export function Segmented<T extends string | number>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: Array<Option<T>>;
+  value: T;
+  onChange: (next: T) => void;
+}) {
+  return (
+    <div className="field">
+      <span className="field-label" id={`${label}-label`}>
+        {label}
+      </span>
+      <div className="segmented" role="group" aria-labelledby={`${label}-label`}>
+        {options.map((opt) => (
+          <button
+            key={String(opt.value)}
+            type="button"
+            className="segmented-btn"
+            aria-pressed={opt.value === value}
+            onClick={() => onChange(opt.value)}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** Loading placeholder that holds the layout steady (no white flash). */
 export function LoadingCard() {
   return (

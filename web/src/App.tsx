@@ -7,6 +7,8 @@ import { Home } from "./pages/Home.js";
 import { CheckEmail } from "./pages/CheckEmail.js";
 import { Expired } from "./pages/Expired.js";
 import { Design } from "./pages/Design.js";
+import { ExperimentLocked } from "./pages/ExperimentLocked.js";
+import { PrepPlaceholder } from "./pages/PrepPlaceholder.js";
 
 type Session =
   | { status: "loading" }
@@ -67,6 +69,8 @@ export function App() {
       <Route path="/auth/check-email" element={<CheckEmail />} />
       <Route path="/auth/expired" element={<Expired />} />
       <Route path="/design" element={<Design />} />
+      <Route path="/experiments/:id" element={<ExperimentLocked />} />
+      <Route path="/experiments/:id/prep" element={<PrepPlaceholder />} />
     </Routes>
   );
 }

@@ -54,3 +54,102 @@ export async function logout(): Promise<void> {
   });
   if (!res.ok) throw await parseError(res);
 }
+
+export type MetricType = "rating_0_10" | "minutes" | "count" | "yes_no";
+export type MetricDirection = "higher_better" | "lower_better";
+
+export interface Template {
+  id: string;
+  substance_name: string;
+  metric_name: string;
+  metric_type: MetricType;
+  metric_direction: MetricDirection;
+  block_length_days: number;
+  num_blocks: number;
+  washout_note: string;
+}
+
+export interface PreviewInput {
+  substance_name?: string;
+  metric_type: MetricType;
+  block_length_days: number;
+  num_blocks: number;
+  template_id?: string;
+}
+
+export interface Preview {
+  num_active_blocks: number;
+  num_blank_blocks: number;
+  run_length_days: number;
+  p_value_floor: number;
+  mde: number;
+  mde_units: string;
+  can_reach_significance: boolean;
+  safety: { blocked: boolean; matched_term: string | null };
+}
+
+export interface CreateInput {
+  substance_name: string;
+  metric_name: string;
+  metric_type: MetricType;
+  metric_direction: MetricDirection;
+  block_length_days: number;
+  num_blocks: number;
+  washout_note: string;
+  acknowledged: boolean;
+}
+
+export interface Experiment {
+  id: string;
+  status: string;
+  pre_registered_at: string;
+  substance_name: string;
+  metric_name: string;
+  metric_type: MetricType;
+  metric_direction: MetricDirection;
+  block_length_days: number;
+  num_blocks: number;
+  num_active_blocks: number;
+  run_length_days: number;
+  washout_note: string;
+  start_date?: string | null;
+  planned_end_date?: string | null;
+  created_at?: string;
+}
+
+export async function getTemplates(): Promise<Template[]> {
+  const res = await fetch("/api/experiments/templates", { credentials: "same-origin" });
+  if (!res.ok) throw await parseError(res);
+  return (await res.json()).templates;
+}
+
+export async function previewDesign(input: PreviewInput, signal?: AbortSignal): Promise<Preview> {
+  const res = await fetch("/api/experiments/preview", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!res.ok) throw await parseError(res);
+  return res.json();
+}
+
+export async function createExperiment(input: CreateInput): Promise<Experiment> {
+  const res = await fetch("/api/experiments", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw await parseError(res);
+  return res.json();
+}
+
+export async function getExperiment(id: string): Promise<Experiment> {
+  const res = await fetch(`/api/experiments/${encodeURIComponent(id)}`, {
+    credentials: "same-origin",
+  });
+  if (!res.ok) throw await parseError(res);
+  return res.json();
+}
