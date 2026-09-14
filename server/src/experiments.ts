@@ -274,6 +274,180 @@ export async function createExperiment(
   return toSummary(experiment);
 }
 
+// Neutral tokens the user sees during prep. No condition word ever pairs with a
+// code; the batch-to-contents link is stated once, on screen only.
+const BATCH_1 = "Batch 1";
+const BATCH_2 = "Batch 2";
+const BLANK = "Blank";
+
+export interface PrepPacket {
+  code: string;
+  batch: string;
+  count: number;
+}
+
+export interface PrepBatch {
+  label: string;
+  contents: string;
+}
+
+// The blind-safe prep read model. Carries codes and a neutral batch token, plus
+// the one-time batch-to-contents link. It NEVER carries a condition word, a
+// block_index, or any date, so the code-to-day schedule stays sealed.
+export interface PrepView {
+  id: string;
+  status: string;
+  substance_name: string;
+  block_length_days: number;
+  num_blocks: number;
+  capsules_per_code: number;
+  batches: PrepBatch[];
+  packets: PrepPacket[];
+}
+
+interface AllocationRow {
+  block_index: number;
+  code: string;
+  condition: string;
+}
+
+/**
+ * Owner-scoped, deterministic, blind-safe prep read model. A miss returns null
+ * so the route answers 404 without leaking existence. The derivation uses no
+ * read-time randomness, so the display is stable across reloads:
+ *  - Batch 1 is every code whose condition equals block 0's condition. Because
+ *    the condition vector was CSPRNG-shuffled at lock, block 0 is active about
+ *    half the time, so which batch holds the substance is already randomized.
+ *  - Fill order sorts each batch by its code string and interleaves the two, so
+ *    the order is uncorrelated with the sealed block_index schedule.
+ */
+export async function getPrep(db: Db, userId: string, id: string): Promise<PrepView | null> {
+  const expRows = await db.query<{
+    id: string;
+    status: string;
+    substance_name: string;
+    block_length_days: number;
+    num_blocks: number;
+  }>(
+    `SELECT id, status, substance_name, block_length_days, num_blocks
+       FROM experiments
+      WHERE id = $1 AND user_id = $2`,
+    [id, userId]
+  );
+  if (expRows.length === 0) return null;
+  const exp = expRows[0];
+
+  const allocations = await db.query<AllocationRow>(
+    `SELECT block_index, code, condition
+       FROM allocations
+      WHERE experiment_id = $1
+      ORDER BY block_index`,
+    [id]
+  );
+
+  const block0 = allocations.find((a) => a.block_index === 0);
+  const c0 = block0 ? block0.condition : "active";
+
+  const batch1Codes = allocations
+    .filter((a) => a.condition === c0)
+    .map((a) => a.code)
+    .sort();
+  const batch2Codes = allocations
+    .filter((a) => a.condition !== c0)
+    .map((a) => a.code)
+    .sort();
+
+  const count = exp.block_length_days;
+  const packets: PrepPacket[] = [];
+  const maxLen = Math.max(batch1Codes.length, batch2Codes.length);
+  for (let i = 0; i < maxLen; i++) {
+    if (i < batch1Codes.length) packets.push({ code: batch1Codes[i], batch: BATCH_1, count });
+    if (i < batch2Codes.length) packets.push({ code: batch2Codes[i], batch: BATCH_2, count });
+  }
+
+  const batch1Contents = c0 === "active" ? exp.substance_name : BLANK;
+  const batch2Contents = c0 === "active" ? BLANK : exp.substance_name;
+
+  return {
+    id: exp.id,
+    status: exp.status,
+    substance_name: exp.substance_name,
+    block_length_days: exp.block_length_days,
+    num_blocks: exp.num_blocks,
+    capsules_per_code: count,
+    batches: [
+      { label: BATCH_1, contents: batch1Contents },
+      { label: BATCH_2, contents: batch2Contents },
+    ],
+    packets,
+  };
+}
+
+/**
+ * Confirm-ready: transition a prepped experiment to running, anchoring the
+ * sealed schedule to a real calendar. A miss returns null (route -> 404); an
+ * experiment in a state that cannot start throws ExperimentError (route -> 422).
+ * Idempotent: a second call on a running experiment changes nothing.
+ *
+ * Dates are set before the status flip so a mid-way crash never leaves a running
+ * experiment with unset block dates. The final flip is guarded by
+ * status = 'prepped', so a retry is a no-op and it touches only the three
+ * columns the immutability trigger permits.
+ */
+export async function confirmPrep(
+  db: Db,
+  userId: string,
+  id: string
+): Promise<(ExperimentSummary & { start_date: string | null; planned_end_date: string | null; created_at: string }) | null> {
+  const rows = await db.query<{ status: string; block_length_days: number; num_blocks: number }>(
+    `SELECT status, block_length_days, num_blocks
+       FROM experiments
+      WHERE id = $1 AND user_id = $2`,
+    [id, userId]
+  );
+  if (rows.length === 0) return null;
+  const { status, block_length_days: length, num_blocks: numBlocks } = rows[0];
+
+  if (status === "running") {
+    // Idempotent success: return the current summary without moving a date.
+    return getExperimentSummary(db, userId, id);
+  }
+  if (status !== "prepped") {
+    const message =
+      status === "unblinded" || status === "voided"
+        ? "This run has already finished."
+        : "This run cannot start from here.";
+    throw new ExperimentError(422, "invalid_state", message);
+  }
+
+  // One anchor for every derived date. CURRENT_DATE is timezone-free and matches
+  // the date columns, keeping the run deterministic.
+  const anchor = await db.query<{ today: string }>(`SELECT CURRENT_DATE::text AS today`);
+  const today = anchor[0].today;
+
+  // Contiguous blocks: block i runs [today + i*L, today + i*L + L - 1].
+  await db.query(
+    `UPDATE allocations
+        SET block_start_date = $1::date + (block_index * $2::int),
+            block_end_date   = $1::date + (block_index * $2::int) + ($2::int - 1)
+      WHERE experiment_id = $3`,
+    [today, length, id]
+  );
+
+  // Flip last, guarded by the current status. Touches only status, start_date,
+  // and planned_end_date, so the immutability trigger never fires.
+  await db.query(
+    `UPDATE experiments
+        SET status = 'running',
+            start_date = $1::date,
+            planned_end_date = $1::date + $2::int
+      WHERE id = $3 AND status = 'prepped'`,
+    [today, length * numBlocks - 1, id]
+  );
+
+  return getExperimentSummary(db, userId, id);
+}
+
 /** Owner-only non-secret summary. A miss returns null (never leaks existence). */
 export async function getExperimentSummary(
   db: Db,
@@ -283,9 +457,13 @@ export async function getExperimentSummary(
   const rows = await db.query<
     ExperimentRow & { start_date: string | null; planned_end_date: string | null; created_at: string }
   >(
+    // Date columns are cast to text so they serialize as plain "YYYY-MM-DD",
+    // not a midnight timestamp that would imply a time of day.
     `SELECT id, status, pre_registered_at, substance_name, metric_name,
             metric_type, metric_direction, block_length_days, num_blocks,
-            num_active_blocks, washout_note, start_date, planned_end_date, created_at
+            num_active_blocks, washout_note,
+            start_date::text AS start_date, planned_end_date::text AS planned_end_date,
+            created_at
        FROM experiments
       WHERE id = $1 AND user_id = $2`,
     [id, userId]

@@ -99,4 +99,65 @@ describe("allocations are never serialized to a client", () => {
     });
     expect(cross.statusCode).toBe(404);
   });
+
+  it("keeps the secret out of a running experiment and its confirm-ready response", async () => {
+    const cookie = await signIn(ctx.app, "running-trust@example.com");
+    const create = await ctx.app.inject({
+      method: "POST",
+      url: "/api/experiments",
+      headers: { cookie },
+      payload: {
+        substance_name: "Theanine",
+        metric_name: "Afternoon focus",
+        metric_type: "rating_0_10",
+        metric_direction: "higher_better",
+        block_length_days: 5,
+        num_blocks: 6,
+        washout_note: "Skip 1 day between blocks.",
+        acknowledged: true,
+      },
+    });
+    const id = create.json().id as string;
+    const codes = (
+      await ctx.db.query<{ code: string }>(`SELECT code FROM allocations WHERE experiment_id = $1`, [id])
+    ).map((r) => r.code);
+
+    const confirm = await ctx.app.inject({
+      method: "POST",
+      url: `/api/experiments/${id}/confirm-prep`,
+      headers: { cookie },
+    });
+    expect(confirm.statusCode).toBe(200);
+    const get = await ctx.app.inject({ method: "GET", url: `/api/experiments/${id}`, headers: { cookie } });
+
+    // The non-secret surfaces still carry no code, condition, or block date.
+    // "active" is not checked here: the summary key num_active_blocks is a design
+    // count, not a condition label (matching the freshly-locked assertion above).
+    for (const res of [confirm, get]) {
+      const body = res.body ?? "";
+      for (const code of codes) expect(body).not.toContain(code);
+      expect(body.toLowerCase()).not.toContain("placebo");
+      expect(body).not.toContain("allocation");
+      expect(body).not.toContain("condition");
+      expect(body).not.toContain("block_start_date");
+      expect(body).not.toContain("block_end_date");
+    }
+
+    // GET .../prep is the one intentional exception: it carries the codes (the
+    // user needs them to label packets) but still no condition word, no
+    // block_index, and no date. That is what keeps the code-to-day schedule
+    // sealed.
+    const prep = await ctx.app.inject({ method: "GET", url: `/api/experiments/${id}/prep`, headers: { cookie } });
+    expect(prep.statusCode).toBe(200);
+    const prepBody = prep.body;
+    // It does carry the codes.
+    for (const code of codes) expect(prepBody).toContain(code);
+    // It never carries a condition label, a block_index, or a date.
+    expect(prepBody).not.toContain("active");
+    expect(prepBody.toLowerCase()).not.toContain("placebo");
+    expect(prepBody).not.toContain("condition");
+    expect(prepBody).not.toContain("block_index");
+    expect(prepBody).not.toContain("block_start_date");
+    expect(prepBody).not.toContain("block_end_date");
+  });
 });

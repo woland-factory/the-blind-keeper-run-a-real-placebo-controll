@@ -3,10 +3,12 @@ import { z } from "zod";
 import { errorEnvelope, requireAuth } from "../http.js";
 import { publicTemplates } from "../templates.js";
 import {
+  confirmPrep,
   createExperiment,
   createSchema,
   ExperimentError,
   getExperimentSummary,
+  getPrep,
   previewDesign,
   previewSchema,
 } from "../experiments.js";
@@ -72,6 +74,49 @@ export async function registerExperimentRoutes(app: FastifyInstance): Promise<vo
         return reply.code(404).send(errorEnvelope("not_found", "That experiment does not exist."));
       }
       return reply.send(summary);
+    }
+  );
+
+  // Blind-safe prep read: codes and neutral batch tokens only, no schedule.
+  // A read, so the global limiter is enough. Allowed once the codes exist
+  // (prepped and running); it does not gate on status.
+  app.get(
+    "/api/experiments/:id/prep",
+    { preHandler: requireAuth },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const params = z.object({ id: idSchema }).safeParse(request.params);
+      if (!params.success) {
+        return reply.code(404).send(errorEnvelope("not_found", "That experiment does not exist."));
+      }
+      const prep = await getPrep(app.db, request.user!.id, params.data.id);
+      if (!prep) {
+        return reply.code(404).send(errorEnvelope("not_found", "That experiment does not exist."));
+      }
+      return reply.send(prep);
+    }
+  );
+
+  // Confirm-ready: start the run. Mutation, so it uses the dedicated bucket.
+  app.post(
+    "/api/experiments/:id/confirm-prep",
+    { preHandler: requireAuth, config: mutationLimit },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const params = z.object({ id: idSchema }).safeParse(request.params);
+      if (!params.success) {
+        return reply.code(404).send(errorEnvelope("not_found", "That experiment does not exist."));
+      }
+      try {
+        const summary = await confirmPrep(app.db, request.user!.id, params.data.id);
+        if (!summary) {
+          return reply.code(404).send(errorEnvelope("not_found", "That experiment does not exist."));
+        }
+        return reply.send(summary);
+      } catch (err) {
+        if (err instanceof ExperimentError) {
+          return reply.code(err.status).send(errorEnvelope(err.code, err.message));
+        }
+        throw err;
+      }
     }
   );
 }
