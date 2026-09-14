@@ -8,9 +8,12 @@ day you log your score and guess whether that day was the blank. At the end it
 gives you a verdict you did not generate and could not bias: whether the
 supplement beat the blank, and whether you could actually feel the difference.
 
-This repository is the foundation: accounts, passwordless sign-in, the database
-schema, the mobile-first shell, and a demo experiment. The experiment designer,
-daily check-ins, and the verdict engine arrive in later releases.
+This repository has the foundation and the experiment designer: accounts,
+passwordless sign-in, the database schema, the mobile-first shell, a demo
+experiment, and the full design flow. Open `/design` to pick a supplement and a
+daily score, see live statistical power as you set the length, then lock the
+plan into a sealed, pre-registered summary. Daily check-ins and the verdict
+engine arrive in later releases.
 
 ## Run it locally
 
