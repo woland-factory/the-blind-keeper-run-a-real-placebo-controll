@@ -40,9 +40,10 @@ test.describe("design and lock", () => {
     await expect(page.getByRole("heading", { name: "Your design is sealed" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Prepare your capsules" })).toBeVisible();
 
-    // The forward button routes to the reserved prep placeholder, not a dead end.
+    // The forward button routes to the real prep walkthrough, not a dead end.
     await page.getByRole("button", { name: "Prepare your capsules" }).click();
-    await expect(page.getByRole("heading", { name: "Capsule prep opens next" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Prepare your capsules" })).toBeVisible();
+    await expect(page.getByText("Step 1 of", { exact: false })).toBeVisible();
 
     // Refreshing the locked summary re-fetches and renders.
     await page.goBack();

@@ -153,3 +153,42 @@ export async function getExperiment(id: string): Promise<Experiment> {
   if (!res.ok) throw await parseError(res);
   return res.json();
 }
+
+export interface PrepBatch {
+  label: string;
+  contents: string;
+}
+
+export interface PrepPacket {
+  code: string;
+  batch: string;
+  count: number;
+}
+
+export interface PrepView {
+  id: string;
+  status: string;
+  substance_name: string;
+  block_length_days: number;
+  num_blocks: number;
+  capsules_per_code: number;
+  batches: PrepBatch[];
+  packets: PrepPacket[];
+}
+
+export async function getPrep(id: string): Promise<PrepView> {
+  const res = await fetch(`/api/experiments/${encodeURIComponent(id)}/prep`, {
+    credentials: "same-origin",
+  });
+  if (!res.ok) throw await parseError(res);
+  return res.json();
+}
+
+export async function confirmPrep(id: string): Promise<Experiment> {
+  const res = await fetch(`/api/experiments/${encodeURIComponent(id)}/confirm-prep`, {
+    method: "POST",
+    credentials: "same-origin",
+  });
+  if (!res.ok) throw await parseError(res);
+  return res.json();
+}

@@ -35,6 +35,12 @@ export default defineConfig({
       APP_BASE_URL: baseURL,
       SESSION_COOKIE_SECRET: "e2e-session-secret-that-is-long-enough-ok",
       SEED_DEMO: "false",
+      // The suite signs a fresh user in for many specs from one host IP. Lift the
+      // per-IP limits for the test server so sequential sign-ins and locks do not
+      // trip the limiter. Production keeps the defaults.
+      AUTH_RATE_LIMIT_MAX: "1000",
+      MUTATION_RATE_LIMIT_MAX: "1000",
+      RATE_LIMIT_MAX: "5000",
     },
   },
   projects: [{ name: "mobile", use: { ...devices["Pixel 7"], viewport: { width: 390, height: 844 } } }],

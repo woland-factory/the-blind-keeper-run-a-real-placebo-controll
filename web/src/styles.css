@@ -473,6 +473,93 @@ a:focus-visible,
   font-size: 1rem;
 }
 
+.run-line {
+  margin-top: 20px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* Prep walkthrough */
+.step-counter {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.prep-step {
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+}
+
+.prep-step-text {
+  font-size: 1.2rem;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.prep-lead {
+  font-size: 1.1rem;
+  margin: 0;
+}
+
+.prep-nav {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.prep-nav .btn {
+  flex: 1 1 0;
+}
+
+.prep-nav .btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.prep-print {
+  width: 100%;
+  margin-top: 12px;
+}
+
+/* Prep sheet: on screen it is print-only, so it stays hidden until printing. */
+.prep-sheet {
+  display: none;
+}
+
+.sheet-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+}
+
+.sheet-table th,
+.sheet-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 1rem;
+}
+
+.sheet-note {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 8px 0 0;
+}
+
+@media print {
+  .prep-live {
+    display: none;
+  }
+  .prep-sheet {
+    display: block;
+    color: #000;
+  }
+}
+
 @media (min-width: 600px) {
   h1 {
     font-size: 1.9rem;

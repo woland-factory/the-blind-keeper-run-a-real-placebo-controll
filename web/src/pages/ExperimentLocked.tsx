@@ -93,13 +93,17 @@ export function ExperimentLocked() {
         </dl>
       </section>
 
-      <button
-        type="button"
-        className="btn btn-primary full"
-        onClick={() => navigate(`/experiments/${e.id}/prep`)}
-      >
-        Prepare your capsules
-      </button>
+      {e.status === "running" ? (
+        <p className="run-line">Run in progress. Come back each day for the packet to open.</p>
+      ) : (
+        <button
+          type="button"
+          className="btn btn-primary full"
+          onClick={() => navigate(`/experiments/${e.id}/prep`)}
+        >
+          Prepare your capsules
+        </button>
+      )}
     </Page>
   );
 }

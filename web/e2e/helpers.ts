@@ -24,3 +24,22 @@ export async function expectNoHorizontalScroll(page: Page): Promise<void> {
   );
   expect(ok).toBe(true);
 }
+
+/**
+ * Sign in, design a real experiment through the /design flow, and lock it.
+ * Returns the new experiment id from the locked-summary URL.
+ */
+export async function lockDesign(page: Page, substance = "Theanine"): Promise<string> {
+  await signIn(page);
+  await page.goto("/design");
+  await expect(page.getByRole("heading", { name: "Design your blind test" })).toBeVisible();
+  await page.locator("#substance").fill(substance);
+  await page.locator("#metric").fill("Afternoon focus");
+  await page.getByRole("checkbox").check();
+  const lock = page.getByRole("button", { name: "Lock and pre-register" });
+  await expect(lock).toBeEnabled();
+  await lock.click();
+  await expect(page).toHaveURL(/\/experiments\/[0-9a-f-]{36}$/);
+  const url = new URL(page.url());
+  return url.pathname.split("/")[2];
+}
