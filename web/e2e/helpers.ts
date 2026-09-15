@@ -43,3 +43,24 @@ export async function lockDesign(page: Page, substance = "Theanine"): Promise<st
   const url = new URL(page.url());
   return url.pathname.split("/")[2];
 }
+
+/**
+ * Lock a design, walk the prep walkthrough to the end, and start the run.
+ * Returns the running experiment's id.
+ */
+export async function startRun(page: Page, substance = "Theanine"): Promise<string> {
+  const id = await lockDesign(page, substance);
+  await page.getByRole("button", { name: "Prepare your capsules" }).click();
+  await expect(page.getByRole("heading", { name: "Prepare your capsules" })).toBeVisible();
+  // Advance with Next until the confirm step exposes Start the run.
+  for (let i = 0; i < 30; i++) {
+    const next = page.getByRole("button", { name: "Next" });
+    if (!(await next.isVisible())) break;
+    await next.click();
+  }
+  const start = page.getByRole("button", { name: "Start the run" });
+  await expect(start).toBeVisible();
+  await start.click();
+  await expect(page.getByRole("heading", { name: "Your run starts today" })).toBeVisible();
+  return id;
+}

@@ -160,4 +160,61 @@ describe("allocations are never serialized to a client", () => {
     expect(prepBody).not.toContain("block_start_date");
     expect(prepBody).not.toContain("block_end_date");
   });
+
+  it("keeps the schedule sealed on the running surfaces, revealing it only after break-blind", async () => {
+    const cookie = await signIn(ctx.app, "run-trust@example.com");
+    const create = await ctx.app.inject({
+      method: "POST",
+      url: "/api/experiments",
+      headers: { cookie },
+      payload: {
+        substance_name: "Theanine",
+        metric_name: "Afternoon focus",
+        metric_type: "rating_0_10",
+        metric_direction: "higher_better",
+        block_length_days: 5,
+        num_blocks: 6,
+        washout_note: "Skip 1 day between blocks.",
+        acknowledged: true,
+      },
+    });
+    const id = create.json().id as string;
+    await ctx.app.inject({ method: "POST", url: `/api/experiments/${id}/confirm-prep`, headers: { cookie } });
+
+    const codes = (
+      await ctx.db.query<{ code: string }>(`SELECT code FROM allocations WHERE experiment_id = $1`, [id])
+    ).map((r) => r.code);
+
+    // GET .../today reveals only today's single code, nothing else.
+    const today = await ctx.app.inject({ method: "GET", url: `/api/experiments/${id}/today`, headers: { cookie } });
+    const todayCode = today.json().today_code as string;
+    const checkin = await ctx.app.inject({
+      method: "POST",
+      url: `/api/experiments/${id}/checkins`,
+      headers: { cookie },
+      payload: { metric_value: 6, placebo_guess: "unsure" },
+    });
+    expect(checkin.statusCode).toBe(201);
+
+    // Neither the today read nor the check-in response leaks the schedule.
+    for (const res of [today, checkin]) {
+      const body = res.body ?? "";
+      for (const code of codes) {
+        if (code === todayCode) continue;
+        expect(body).not.toContain(code);
+      }
+      expect(body.toLowerCase()).not.toContain("placebo");
+      expect(body).not.toContain("condition");
+      expect(body).not.toContain("block_index");
+      expect(body).not.toContain("block_start_date");
+      expect(body).not.toContain("block_end_date");
+    }
+
+    // POST .../break-blind is the one intentional reveal, and only after voiding.
+    const reveal = await ctx.app.inject({ method: "POST", url: `/api/experiments/${id}/break-blind`, headers: { cookie } });
+    expect(reveal.statusCode).toBe(200);
+    const revealBody = reveal.json() as { status: string; blocks: Array<{ code: string; contents: string }> };
+    expect(revealBody.status).toBe("voided");
+    for (const code of codes) expect(reveal.body).toContain(code);
+  });
 });
