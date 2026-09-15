@@ -3,14 +3,18 @@ import { z } from "zod";
 import { errorEnvelope, requireAuth } from "../http.js";
 import { publicTemplates } from "../templates.js";
 import {
+  breakBlind,
+  checkInSchema,
   confirmPrep,
   createExperiment,
   createSchema,
   ExperimentError,
   getExperimentSummary,
   getPrep,
+  getToday,
   previewDesign,
   previewSchema,
+  submitCheckIn,
 } from "../experiments.js";
 
 const idSchema = z.string().uuid();
@@ -93,6 +97,77 @@ export async function registerExperimentRoutes(app: FastifyInstance): Promise<vo
         return reply.code(404).send(errorEnvelope("not_found", "That experiment does not exist."));
       }
       return reply.send(prep);
+    }
+  );
+
+  // Blind-safe "today" read: today's code and progress numbers only, no schedule.
+  // A read, so the global limiter is enough. Blind-safe in every status (2.4).
+  app.get(
+    "/api/experiments/:id/today",
+    { preHandler: requireAuth },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const params = z.object({ id: idSchema }).safeParse(request.params);
+      if (!params.success) {
+        return reply.code(404).send(errorEnvelope("not_found", "That experiment does not exist."));
+      }
+      const today = await getToday(app.db, request.user!.id, params.data.id);
+      if (!today) {
+        return reply.code(404).send(errorEnvelope("not_found", "That experiment does not exist."));
+      }
+      return reply.send(today);
+    }
+  );
+
+  // Daily check-in. Mutation, so it uses the dedicated bucket. One row per day.
+  app.post(
+    "/api/experiments/:id/checkins",
+    { preHandler: requireAuth, config: mutationLimit },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const params = z.object({ id: idSchema }).safeParse(request.params);
+      if (!params.success) {
+        return reply.code(404).send(errorEnvelope("not_found", "That experiment does not exist."));
+      }
+      const parsed = checkInSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send(errorEnvelope("invalid_input", "Check your entry and try again."));
+      }
+      try {
+        const today = await submitCheckIn(app.db, request.user!.id, params.data.id, parsed.data);
+        if (!today) {
+          return reply.code(404).send(errorEnvelope("not_found", "That experiment does not exist."));
+        }
+        return reply.code(201).send(today);
+      } catch (err) {
+        if (err instanceof ExperimentError) {
+          return reply.code(err.status).send(errorEnvelope(err.code, err.message));
+        }
+        throw err;
+      }
+    }
+  );
+
+  // Break the blind: reveal the schedule and void the run. Mutation bucket. The
+  // reveal is the one intentional allocation disclosure, gated behind voiding.
+  app.post(
+    "/api/experiments/:id/break-blind",
+    { preHandler: requireAuth, config: mutationLimit },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const params = z.object({ id: idSchema }).safeParse(request.params);
+      if (!params.success) {
+        return reply.code(404).send(errorEnvelope("not_found", "That experiment does not exist."));
+      }
+      try {
+        const reveal = await breakBlind(app.db, request.user!.id, params.data.id);
+        if (!reveal) {
+          return reply.code(404).send(errorEnvelope("not_found", "That experiment does not exist."));
+        }
+        return reply.send(reveal);
+      } catch (err) {
+        if (err instanceof ExperimentError) {
+          return reply.code(err.status).send(errorEnvelope(err.code, err.message));
+        }
+        throw err;
+      }
     }
   );
 

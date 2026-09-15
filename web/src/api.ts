@@ -192,3 +192,70 @@ export async function confirmPrep(id: string): Promise<Experiment> {
   if (!res.ok) throw await parseError(res);
   return res.json();
 }
+
+export type RunPhase = "prepped" | "running" | "complete" | "voided" | "unblinded";
+export type PlaceboGuess = "placebo" | "active" | "unsure";
+
+export interface TodayView {
+  id: string;
+  status: string;
+  phase: RunPhase;
+  metric_name: string;
+  metric_type: MetricType;
+  metric_direction: MetricDirection;
+  run_length_days: number;
+  day_number: number | null;
+  sealed_day_streak: number;
+  days_remaining: number;
+  today_code: string | null;
+  check_in_done: boolean;
+}
+
+export interface CheckInInput {
+  metric_value: number;
+  note: string;
+  placebo_guess: PlaceboGuess;
+}
+
+export interface RevealBlock {
+  code: string;
+  contents: string;
+  block_start_date: string;
+  block_end_date: string;
+}
+
+export interface BreakBlindReveal {
+  id: string;
+  status: string;
+  broke_blind_at: string | null;
+  substance_name: string;
+  blocks: RevealBlock[];
+}
+
+export async function getToday(id: string): Promise<TodayView> {
+  const res = await fetch(`/api/experiments/${encodeURIComponent(id)}/today`, {
+    credentials: "same-origin",
+  });
+  if (!res.ok) throw await parseError(res);
+  return res.json();
+}
+
+export async function submitCheckIn(id: string, input: CheckInInput): Promise<TodayView> {
+  const res = await fetch(`/api/experiments/${encodeURIComponent(id)}/checkins`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw await parseError(res);
+  return res.json();
+}
+
+export async function breakBlind(id: string): Promise<BreakBlindReveal> {
+  const res = await fetch(`/api/experiments/${encodeURIComponent(id)}/break-blind`, {
+    method: "POST",
+    credentials: "same-origin",
+  });
+  if (!res.ok) throw await parseError(res);
+  return res.json();
+}

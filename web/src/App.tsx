@@ -9,6 +9,7 @@ import { Expired } from "./pages/Expired.js";
 import { Design } from "./pages/Design.js";
 import { ExperimentLocked } from "./pages/ExperimentLocked.js";
 import { Prep } from "./pages/Prep.js";
+import { Run } from "./pages/Run.js";
 
 type Session =
   | { status: "loading" }
@@ -71,6 +72,7 @@ export function App() {
       <Route path="/design" element={<Design />} />
       <Route path="/experiments/:id" element={<ExperimentLocked />} />
       <Route path="/experiments/:id/prep" element={<Prep />} />
+      <Route path="/experiments/:id/run" element={<Run />} />
     </Routes>
   );
 }

@@ -448,6 +448,324 @@ export async function confirmPrep(
   return getExperimentSummary(db, userId, id);
 }
 
+// The phase drives the whole dashboard. It is derived from status and today's
+// date, never stored, so it stays consistent with the sealed calendar.
+export type RunPhase = "prepped" | "running" | "complete" | "voided" | "unblinded";
+
+// The blind-safe "today" read model. It carries today's single code and the
+// non-secret progress numbers, and NEVER a condition, another block's code, a
+// block_index, or a block date. Proven blind-safe by test.
+export interface TodayView {
+  id: string;
+  status: string;
+  phase: RunPhase;
+  metric_name: string;
+  metric_type: string;
+  metric_direction: string;
+  run_length_days: number;
+  day_number: number | null;
+  sealed_day_streak: number;
+  days_remaining: number;
+  today_code: string | null;
+  check_in_done: boolean;
+}
+
+interface TodayRow {
+  id: string;
+  status: string;
+  metric_name: string;
+  metric_type: string;
+  metric_direction: string;
+  block_length_days: number;
+  num_blocks: number;
+  start_date: string | null;
+  planned_end_date: string | null;
+  days_since_start: number | null;
+  days_to_end: number | null;
+}
+
+/**
+ * Owner-scoped, blind-safe "today" read model. A miss returns null so the route
+ * answers 404 without leaking existence. Every derived number comes off a single
+ * CURRENT_DATE anchor. today_code is fetched separately (code only, never the
+ * condition) and is non-null ONLY while running, so a sealed schedule never leaks.
+ */
+export async function getToday(db: Db, userId: string, id: string): Promise<TodayView | null> {
+  const rows = await db.query<TodayRow>(
+    `SELECT id, status, metric_name, metric_type, metric_direction,
+            block_length_days, num_blocks,
+            start_date::text AS start_date,
+            planned_end_date::text AS planned_end_date,
+            (CURRENT_DATE - start_date) AS days_since_start,
+            (planned_end_date - CURRENT_DATE) AS days_to_end
+       FROM experiments
+      WHERE id = $1 AND user_id = $2`,
+    [id, userId]
+  );
+  if (rows.length === 0) return null;
+  const row = rows[0];
+
+  const runLength = row.block_length_days * row.num_blocks;
+  const sinceStart = row.days_since_start;
+  const toEnd = row.days_to_end;
+
+  let phase: RunPhase;
+  if (row.status === "voided") {
+    phase = "voided";
+  } else if (row.status === "unblinded") {
+    phase = "unblinded";
+  } else if (row.status === "running") {
+    // Within the calendar window is running; past the last block is complete.
+    phase = toEnd !== null && toEnd >= 0 ? "running" : "complete";
+  } else {
+    phase = "prepped";
+  }
+
+  let todayCode: string | null = null;
+  if (phase === "running") {
+    // Code only. Never condition, never block_index. The BETWEEN uses the same
+    // CURRENT_DATE anchor as the numbers above.
+    const codeRows = await db.query<{ code: string }>(
+      `SELECT code FROM allocations
+        WHERE experiment_id = $1
+          AND CURRENT_DATE BETWEEN block_start_date AND block_end_date`,
+      [id]
+    );
+    todayCode = codeRows.length > 0 ? codeRows[0].code : null;
+  }
+
+  const doneRows = await db.query<{ done: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM check_ins WHERE experiment_id = $1 AND check_date = CURRENT_DATE
+     ) AS done`,
+    [id]
+  );
+
+  const dayNumber = phase === "running" && sinceStart !== null ? sinceStart + 1 : null;
+  let sealedStreak = 0;
+  if (phase === "running" && sinceStart !== null) {
+    sealedStreak = Math.min(sinceStart + 1, runLength);
+  } else if (phase === "complete") {
+    sealedStreak = runLength;
+  }
+  const daysRemaining = phase === "running" && toEnd !== null ? Math.max(toEnd, 0) : 0;
+
+  return {
+    id: row.id,
+    status: row.status,
+    phase,
+    metric_name: row.metric_name,
+    metric_type: row.metric_type,
+    metric_direction: row.metric_direction,
+    run_length_days: runLength,
+    day_number: dayNumber,
+    sealed_day_streak: sealedStreak,
+    days_remaining: daysRemaining,
+    today_code: todayCode,
+    check_in_done: doneRows[0].done,
+  };
+}
+
+// The daily check-in, validated at the boundary. .strict() rejects any extra
+// field, including a client-supplied check_date: the date is always the server's
+// CURRENT_DATE. The placebo guess is user data, never the allocation.
+export const checkInSchema = z
+  .object({
+    metric_value: z.number(),
+    note: z.string().trim().max(500).optional().default(""),
+    placebo_guess: z.enum(["placebo", "active", "unsure"]),
+  })
+  .strict();
+
+export type CheckInInput = z.infer<typeof checkInSchema>;
+
+/** Throw a 422 invalid_input with a plain message when the value is out of range. */
+export function validateMetricValue(metricType: string, value: number): void {
+  switch (metricType) {
+    case "rating_0_10":
+      if (!Number.isInteger(value) || value < 0 || value > 10) {
+        throw new ExperimentError(422, "invalid_input", "Use a score from 0 to 10.");
+      }
+      return;
+    case "minutes":
+      if (value < 0 || value > 1440) {
+        throw new ExperimentError(422, "invalid_input", "Use a number of minutes from 0 to 1440.");
+      }
+      return;
+    case "count":
+      if (!Number.isInteger(value) || value < 0 || value > 10000) {
+        throw new ExperimentError(422, "invalid_input", "Use a whole number from 0 to 10000.");
+      }
+      return;
+    case "yes_no":
+      if (value !== 0 && value !== 1) {
+        throw new ExperimentError(422, "invalid_input", "Choose yes or no.");
+      }
+      return;
+    default:
+      throw new ExperimentError(422, "invalid_input", "Check your entry and try again.");
+  }
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  const code = (err as { code?: string })?.code;
+  if (code === "23505") return true;
+  const message = String((err as { message?: string })?.message ?? "");
+  return /duplicate key|unique constraint/i.test(message);
+}
+
+/**
+ * Record one check-in for today. Owner-scoped. A miss returns null (route -> 404).
+ * State and metric guards throw ExperimentError. A second check-in the same day
+ * hits the UNIQUE (experiment_id, check_date) guard and throws 409; the first row
+ * is never edited. On success returns the refreshed blind-safe today payload.
+ */
+export async function submitCheckIn(
+  db: Db,
+  userId: string,
+  id: string,
+  input: CheckInInput
+): Promise<TodayView | null> {
+  const rows = await db.query<{
+    status: string;
+    metric_type: string;
+    days_since_start: number | null;
+    days_to_end: number | null;
+  }>(
+    `SELECT status, metric_type,
+            (CURRENT_DATE - start_date) AS days_since_start,
+            (planned_end_date - CURRENT_DATE) AS days_to_end
+       FROM experiments
+      WHERE id = $1 AND user_id = $2`,
+    [id, userId]
+  );
+  if (rows.length === 0) return null;
+  const { status, metric_type, days_since_start: sinceStart, days_to_end: toEnd } = rows[0];
+
+  if (status !== "running") {
+    const message =
+      status === "unblinded" || status === "voided"
+        ? "This run has already finished."
+        : "This run has not started.";
+    throw new ExperimentError(422, "invalid_state", message);
+  }
+  // Running but past the last block: nothing to log today.
+  if (toEnd === null || toEnd < 0 || sinceStart === null || sinceStart < 0) {
+    throw new ExperimentError(422, "invalid_state", "This run is finished. Nothing to log today.");
+  }
+
+  validateMetricValue(metric_type, input.metric_value);
+
+  const note = input.note.trim() === "" ? null : input.note.trim();
+  try {
+    await db.query(
+      `INSERT INTO check_ins (experiment_id, check_date, metric_value, note, placebo_guess)
+       VALUES ($1, CURRENT_DATE, $2, $3, $4)`,
+      [id, input.metric_value, note, input.placebo_guess]
+    );
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      throw new ExperimentError(409, "already_checked_in", "You already checked in today.");
+    }
+    throw err;
+  }
+
+  return getToday(db, userId, id);
+}
+
+// The one intentional allocation reveal, gated behind voiding the run.
+export interface RevealBlock {
+  code: string;
+  contents: string;
+  block_start_date: string;
+  block_end_date: string;
+}
+
+export interface BreakBlindReveal {
+  id: string;
+  status: string;
+  broke_blind_at: string | null;
+  substance_name: string;
+  blocks: RevealBlock[];
+}
+
+async function buildReveal(db: Db, id: string): Promise<BreakBlindReveal> {
+  const expRows = await db.query<{
+    id: string;
+    status: string;
+    substance_name: string;
+    broke_blind_at: string | null;
+  }>(
+    `SELECT id, status, substance_name, broke_blind_at
+       FROM experiments WHERE id = $1`,
+    [id]
+  );
+  const exp = expRows[0];
+  const allocations = await db.query<{
+    code: string;
+    condition: string;
+    block_start_date: string;
+    block_end_date: string;
+  }>(
+    `SELECT code, condition,
+            block_start_date::text AS block_start_date,
+            block_end_date::text AS block_end_date
+       FROM allocations
+      WHERE experiment_id = $1
+      ORDER BY block_index`,
+    [id]
+  );
+  return {
+    id: exp.id,
+    status: exp.status,
+    broke_blind_at: exp.broke_blind_at,
+    substance_name: exp.substance_name,
+    blocks: allocations.map((a) => ({
+      code: a.code,
+      contents: a.condition === "active" ? exp.substance_name : BLANK,
+      block_start_date: a.block_start_date,
+      block_end_date: a.block_end_date,
+    })),
+  };
+}
+
+/**
+ * Break the blind: reveal the schedule and void the run permanently. Owner-scoped.
+ * A miss returns null (route -> 404). Voiding touches only status and
+ * broke_blind_at, so the immutability trigger never fires. Idempotent on an
+ * already-voided run; refuses a finished (unblinded) or not-yet-started run.
+ */
+export async function breakBlind(
+  db: Db,
+  userId: string,
+  id: string
+): Promise<BreakBlindReveal | null> {
+  const rows = await db.query<{ status: string }>(
+    `SELECT status FROM experiments WHERE id = $1 AND user_id = $2`,
+    [id, userId]
+  );
+  if (rows.length === 0) return null;
+  const status = rows[0].status;
+
+  if (status === "running") {
+    // Guarded by status = 'running' so a retry is a no-op and it touches only the
+    // two columns the immutability trigger permits.
+    await db.query(
+      `UPDATE experiments
+          SET status = 'voided', broke_blind_at = now()
+        WHERE id = $1 AND status = 'running'`,
+      [id]
+    );
+    return buildReveal(db, id);
+  }
+  if (status === "voided") {
+    // Idempotent: the schedule is already unsealed. Re-show it, move nothing.
+    return buildReveal(db, id);
+  }
+  const message = status === "unblinded" ? "This run has already finished." : "This run has not started.";
+  throw new ExperimentError(422, "invalid_state", message);
+}
+
 /** Owner-only non-secret summary. A miss returns null (never leaks existence). */
 export async function getExperimentSummary(
   db: Db,

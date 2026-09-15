@@ -94,7 +94,18 @@ export function ExperimentLocked() {
       </section>
 
       {e.status === "running" ? (
-        <p className="run-line">Run in progress. Come back each day for the packet to open.</p>
+        <>
+          <p className="run-line">Run in progress. Come back each day for the packet to open.</p>
+          <button
+            type="button"
+            className="btn btn-primary full"
+            onClick={() => navigate(`/experiments/${e.id}/run`)}
+          >
+            Open today
+          </button>
+        </>
+      ) : e.status === "voided" ? (
+        <p className="run-line">This run is voided.</p>
       ) : (
         <button
           type="button"

@@ -8,6 +8,7 @@ import { runMigrations } from "./db/migrate.js";
 import { loadEnv } from "./env.js";
 import { runSeed } from "./seed.js";
 import { createMailer } from "./mailer.js";
+import { sendDailyReminders } from "./reminders.js";
 import { DEMO_EMAIL } from "./seed.js";
 import { issueMagicToken } from "./auth.js";
 
@@ -48,6 +49,20 @@ async function main(): Promise<void> {
     app.spaIndexPath = path.join(dir, "index.html");
   } else {
     app.log.warn(`static dir not found at ${dir}; serving API only`);
+  }
+
+  // Daily reminder sweep. The reminder_sends unique guard bounds it to one email
+  // per user per day, so correctness does not depend on the cadence. unref() so it
+  // never holds the process open; tests never build this timer (it lives here, not
+  // in buildApp).
+  if (env.remindersEnabled) {
+    const everyMs = env.REMINDER_SWEEP_INTERVAL_MINUTES * 60_000;
+    const timer = setInterval(() => {
+      sendDailyReminders(db, mailer, env.APP_BASE_URL, app.log).catch((err) =>
+        app.log.error({ err }, "reminder sweep failed")
+      );
+    }, everyMs);
+    timer.unref();
   }
 
   await app.listen({ port: env.PORT, host: "0.0.0.0" });

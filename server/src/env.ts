@@ -24,11 +24,15 @@ const schema = z.object({
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(5),
   MUTATION_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(20),
   E2E_EXPOSE_MAGIC_LINK: boolish,
+  // Left optional so the default can depend on NODE_ENV (on in production only).
+  REMINDERS_ENABLED: z.string().optional(),
+  REMINDER_SWEEP_INTERVAL_MINUTES: z.coerce.number().int().positive().default(60),
 });
 
 export type Env = z.infer<typeof schema> & {
   mailTransport: "central" | "console";
   isProd: boolean;
+  remindersEnabled: boolean;
 };
 
 export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
@@ -45,6 +49,12 @@ export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
   // Default transport: console in dev/test, central in production.
   const mailTransport = env.MAIL_TRANSPORT ?? (isProd ? "central" : "console");
 
+  // Reminders default on only in production; explicit env overrides either way.
+  const remindersEnabled =
+    env.REMINDERS_ENABLED !== undefined
+      ? env.REMINDERS_ENABLED === "true" || env.REMINDERS_ENABLED === "1"
+      : isProd;
+
   if (isProd) {
     if (!env.DATABASE_URL && env.DB_DRIVER !== "pglite") {
       throw new Error("DATABASE_URL is required in production");
@@ -57,5 +67,5 @@ export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
     }
   }
 
-  return { ...env, mailTransport, isProd };
+  return { ...env, mailTransport, isProd, remindersEnabled };
 }
