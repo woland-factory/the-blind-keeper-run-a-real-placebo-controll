@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ApiRequestError,
   breakBlind,
   getToday,
   submitCheckIn,
+  unblind,
   type BreakBlindReveal,
   type PlaceboGuess,
   type TodayView,
@@ -35,6 +36,77 @@ function PhaseCard({
         <p className="subhead">{body}</p>
         <Link className="btn btn-ghost full" to={backTo}>
           {backLabel}
+        </Link>
+      </section>
+    </Page>
+  );
+}
+
+/** The complete phase: the run is done, and the reveal is one press away. */
+function CompleteCard({ id }: { id: string }) {
+  const navigate = useNavigate();
+  const [revealing, setRevealing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onReveal() {
+    if (revealing) return;
+    setRevealing(true);
+    setError(null);
+    try {
+      await unblind(id);
+      navigate(`/experiments/${id}/verdict`);
+    } catch (err) {
+      if (err instanceof ApiRequestError && err.status === 422) {
+        // The run is no longer revealable here (voided, or a race): the summary
+        // shows the right next step.
+        navigate(`/experiments/${id}`);
+        return;
+      }
+      setError("Check your connection and try again.");
+      setRevealing(false);
+    }
+  }
+
+  return (
+    <Page>
+      <section className="card">
+        <h1>Your run is complete</h1>
+        <p className="subhead">
+          Every block is logged. The schedule stays sealed until you reveal the verdict.
+        </p>
+        {error && (
+          <p className="field-error" role="alert">
+            {error}
+          </p>
+        )}
+        <button
+          type="button"
+          className="btn btn-primary full"
+          onClick={() => void onReveal()}
+          disabled={revealing}
+          aria-busy={revealing}
+        >
+          {revealing ? "Revealing…" : "Reveal the verdict"}
+        </button>
+        <Link className="btn btn-ghost full" to={`/experiments/${id}`}>
+          Back to summary
+        </Link>
+      </section>
+    </Page>
+  );
+}
+
+/** The unblinded phase: the verdict is stored and waiting. */
+function UnblindedCard({ id }: { id: string }) {
+  return (
+    <Page>
+      <section className="card">
+        <h1>Your verdict is ready</h1>
+        <Link className="btn btn-primary full" to={`/experiments/${id}/verdict`}>
+          See the verdict
+        </Link>
+        <Link className="btn btn-ghost full" to={`/experiments/${id}`}>
+          Back to summary
         </Link>
       </section>
     </Page>
@@ -356,14 +428,7 @@ export function Run() {
     );
   }
   if (today.phase === "complete") {
-    return (
-      <PhaseCard
-        heading="Your run is complete"
-        body="You logged every block. The verdict is the next step."
-        backTo={backTo}
-        backLabel="Back to summary"
-      />
-    );
+    return <CompleteCard id={id!} />;
   }
   if (today.phase === "voided") {
     return (
@@ -385,14 +450,6 @@ export function Run() {
       />
     );
   }
-  // unblinded: EPIC 5 owns this screen. Offer only a way back.
-  return (
-    <Page>
-      <section className="card">
-        <Link className="btn btn-ghost full" to={backTo}>
-          Back to summary
-        </Link>
-      </section>
-    </Page>
-  );
+  // unblinded: the verdict is stored and waiting.
+  return <UnblindedCard id={id!} />;
 }

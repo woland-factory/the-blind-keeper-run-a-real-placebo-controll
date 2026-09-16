@@ -662,6 +662,38 @@ a:focus-visible,
   display: table;
 }
 
+/* Verdict screen: the two reveal cards carry the weight. */
+.verdict-card {
+  border-color: var(--accent);
+}
+
+.reveal-lead {
+  font-size: 1.3rem;
+  line-height: 1.35;
+  margin: 0;
+  color: var(--ink);
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 16px 0 0;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.blind-line {
+  margin: 20px 0 0;
+  color: var(--ink);
+}
+
+.adherence-line {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-weight: 600;
+}
+
 @media (min-width: 600px) {
   h1 {
     font-size: 1.9rem;

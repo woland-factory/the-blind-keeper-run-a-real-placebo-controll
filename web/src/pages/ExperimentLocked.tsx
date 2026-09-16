@@ -106,6 +106,17 @@ export function ExperimentLocked() {
         </>
       ) : e.status === "voided" ? (
         <p className="run-line">This run is voided.</p>
+      ) : e.status === "unblinded" ? (
+        <>
+          <p className="run-line">This run is finished.</p>
+          <button
+            type="button"
+            className="btn btn-primary full"
+            onClick={() => navigate(`/experiments/${e.id}/verdict`)}
+          >
+            See the verdict
+          </button>
+        </>
       ) : (
         <button
           type="button"

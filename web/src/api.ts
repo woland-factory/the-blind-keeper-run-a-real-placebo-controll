@@ -259,3 +259,55 @@ export async function breakBlind(id: string): Promise<BreakBlindReveal> {
   if (!res.ok) throw await parseError(res);
   return res.json();
 }
+
+export interface VerdictNumbers {
+  effect_estimate: number | null;
+  effect_units: string | null;
+  permutation_p_value: number | null;
+  p_value_floor: number | null;
+  significant: boolean;
+  guess_days_scored: number;
+  guess_days_correct: number;
+  guess_days_unsure: number;
+  guess_accuracy: number | null;
+  guess_p_value_vs_chance: number | null;
+  guesses_beat_chance: boolean;
+  days_logged: number;
+  adherence_pct: number | null;
+  blind_integrity_flag: boolean;
+  power_note: string;
+  verdict_text: string;
+  guess_text: string;
+  computed_at: string;
+}
+
+export interface VerdictView {
+  id: string;
+  status: string;
+  substance_name: string;
+  metric_name: string;
+  metric_type: MetricType;
+  metric_direction: MetricDirection;
+  num_blocks: number;
+  block_length_days: number;
+  run_length_days: number;
+  verdict: VerdictNumbers;
+  blocks: RevealBlock[];
+}
+
+export async function unblind(id: string): Promise<VerdictView> {
+  const res = await fetch(`/api/experiments/${encodeURIComponent(id)}/unblind`, {
+    method: "POST",
+    credentials: "same-origin",
+  });
+  if (!res.ok) throw await parseError(res);
+  return res.json();
+}
+
+export async function getVerdict(id: string): Promise<VerdictView> {
+  const res = await fetch(`/api/experiments/${encodeURIComponent(id)}/verdict`, {
+    credentials: "same-origin",
+  });
+  if (!res.ok) throw await parseError(res);
+  return res.json();
+}
