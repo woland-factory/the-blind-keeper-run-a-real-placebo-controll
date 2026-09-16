@@ -8,13 +8,16 @@ import {
   confirmPrep,
   createExperiment,
   createSchema,
+  devCompleteRun,
   ExperimentError,
   getExperimentSummary,
   getPrep,
   getToday,
+  getVerdictView,
   previewDesign,
   previewSchema,
   submitCheckIn,
+  unblindExperiment,
 } from "../experiments.js";
 
 const idSchema = z.string().uuid();
@@ -170,6 +173,84 @@ export async function registerExperimentRoutes(app: FastifyInstance): Promise<vo
       }
     }
   );
+
+  // Unblind: the signature moment. Flips a complete run to unblinded, computes
+  // the verdict once, and serves it. Mutation bucket. Idempotent after the flip.
+  app.post(
+    "/api/experiments/:id/unblind",
+    { preHandler: requireAuth, config: mutationLimit },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const params = z.object({ id: idSchema }).safeParse(request.params);
+      if (!params.success) {
+        return reply.code(404).send(errorEnvelope("not_found", "That experiment does not exist."));
+      }
+      try {
+        const view = await unblindExperiment(app.db, request.user!.id, params.data.id);
+        if (!view) {
+          return reply.code(404).send(errorEnvelope("not_found", "That experiment does not exist."));
+        }
+        return reply.send(view);
+      } catch (err) {
+        if (err instanceof ExperimentError) {
+          return reply.code(err.status).send(errorEnvelope(err.code, err.message));
+        }
+        throw err;
+      }
+    }
+  );
+
+  // The stored verdict for an unblinded run. A read, so the global limiter is
+  // enough. Serves the schedule only once status = 'unblinded'.
+  app.get(
+    "/api/experiments/:id/verdict",
+    { preHandler: requireAuth },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const params = z.object({ id: idSchema }).safeParse(request.params);
+      if (!params.success) {
+        return reply.code(404).send(errorEnvelope("not_found", "That experiment does not exist."));
+      }
+      try {
+        const view = await getVerdictView(app.db, request.user!.id, params.data.id);
+        if (!view) {
+          return reply.code(404).send(errorEnvelope("not_found", "That experiment does not exist."));
+        }
+        return reply.send(view);
+      } catch (err) {
+        if (err instanceof ExperimentError) {
+          return reply.code(err.status).send(errorEnvelope(err.code, err.message));
+        }
+        throw err;
+      }
+    }
+  );
+
+  // Test/dev scaffolding: complete a running experiment without a 42-day wait.
+  // Registered ONLY under the console mail transport, so it cannot exist on
+  // staging or production. Not a product surface, gets no UI.
+  if (app.env.mailTransport === "console") {
+    app.post(
+      "/api/experiments/:id/complete-run",
+      { preHandler: requireAuth, config: mutationLimit },
+      async (request: FastifyRequest, reply: FastifyReply) => {
+        const params = z.object({ id: idSchema }).safeParse(request.params);
+        if (!params.success) {
+          return reply.code(404).send(errorEnvelope("not_found", "That experiment does not exist."));
+        }
+        try {
+          const ok = await devCompleteRun(app.db, request.user!.id, params.data.id);
+          if (ok === null) {
+            return reply.code(404).send(errorEnvelope("not_found", "That experiment does not exist."));
+          }
+          return reply.send({ ok: true });
+        } catch (err) {
+          if (err instanceof ExperimentError) {
+            return reply.code(err.status).send(errorEnvelope(err.code, err.message));
+          }
+          throw err;
+        }
+      }
+    );
+  }
 
   // Confirm-ready: start the run. Mutation, so it uses the dedicated bucket.
   app.post(

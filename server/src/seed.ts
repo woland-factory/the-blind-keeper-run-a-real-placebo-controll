@@ -1,21 +1,19 @@
 import type { Db } from "./db/index.js";
+import { computeVerdict } from "./verdict.js";
+import type { Condition, PlaceboGuess } from "./verdict.js";
 
 // Idempotent demo seed. Runs only when SEED_DEMO=true. Provisions one demo
 // account holding a single completed (unblinded) experiment with a full set of
-// allocations, a realistic run of daily check-ins, and one static verdict. All
-// numbers are hand-authored: no statistics are computed here.
+// allocations and a realistic run of daily check-ins. The verdict is computed
+// by the real engine over that data, so the demo answer is a true output of the
+// product, never hand-authored numbers.
 
 export const DEMO_EMAIL = "demo@blind-keeper.app";
-
-const VERDICT_TEXT =
-  "Your sleep scores could not tell magnesium from a blank. You guessed the blank days about as often as a coin flip.";
-const POWER_NOTE =
-  'This run was small, so it can miss a weak effect. Read a null as "not enough signal," not "proven nothing."';
 
 interface Block {
   index: number;
   code: string;
-  condition: "active" | "placebo";
+  condition: Condition;
 }
 
 const BLOCKS: Block[] = [
@@ -28,6 +26,9 @@ const BLOCKS: Block[] = [
 ];
 
 const BLOCK_LENGTH = 7;
+const NUM_ACTIVE = 3;
+const METRIC_TYPE = "rating_0_10";
+const METRIC_DIRECTION = "higher_better";
 const START = new Date("2026-07-01T00:00:00Z");
 
 function addDays(base: Date, days: number): Date {
@@ -41,6 +42,11 @@ function isoDate(d: Date): string {
 }
 
 const GUESS_CYCLE = ["placebo", "active", "unsure", "active", "placebo", "active", "unsure"];
+
+// A realistic, near-null run: active and blank days score about the same.
+function seededValue(i: number): number {
+  return 6 + ((i * 3) % 5) * 0.4; // 6.0 .. 7.6, no real active/blank gap
+}
 
 export async function runSeed(db: Db, log: { info: (msg: string) => void } = console): Promise<boolean> {
   // Guard: only seed once. If the demo user already has an experiment, skip.
@@ -61,7 +67,8 @@ export async function runSeed(db: Db, log: { info: (msg: string) => void } = con
   );
   const userId = userRows[0].id;
 
-  const endDate = addDays(START, BLOCKS.length * BLOCK_LENGTH - 1);
+  const runLength = BLOCKS.length * BLOCK_LENGTH;
+  const endDate = addDays(START, runLength - 1);
   const expRows = await db.query<{ id: string }>(
     `INSERT INTO experiments
        (user_id, substance_name, metric_name, metric_type, metric_direction,
@@ -73,11 +80,11 @@ export async function runSeed(db: Db, log: { info: (msg: string) => void } = con
       userId,
       "Magnesium glycinate",
       "Sleep quality",
-      "rating_0_10",
-      "higher_better",
+      METRIC_TYPE,
+      METRIC_DIRECTION,
       BLOCK_LENGTH,
       BLOCKS.length,
-      3,
+      NUM_ACTIVE,
       "Skip the last day of each block before switching packets.",
       isoDate(START),
       isoDate(endDate),
@@ -85,36 +92,83 @@ export async function runSeed(db: Db, log: { info: (msg: string) => void } = con
   );
   const experimentId = expRows[0].id;
 
-  for (const block of BLOCKS) {
+  const allocations = BLOCKS.map((block) => {
     const blockStart = addDays(START, block.index * BLOCK_LENGTH);
     const blockEnd = addDays(blockStart, BLOCK_LENGTH - 1);
+    return {
+      condition: block.condition,
+      block_start_date: isoDate(blockStart),
+      block_end_date: isoDate(blockEnd),
+      code: block.code,
+      index: block.index,
+    };
+  });
+
+  for (const a of allocations) {
     await db.query(
       `INSERT INTO allocations
          (experiment_id, block_index, code, condition, block_start_date, block_end_date)
        VALUES ($1, $2, $3, $4, $5, $6)`,
-      [experimentId, block.index, block.code, block.condition, isoDate(blockStart), isoDate(blockEnd)]
+      [experimentId, a.index, a.code, a.condition, a.block_start_date, a.block_end_date]
     );
   }
 
-  // A realistic, near-null run: active and blank days score about the same.
-  for (let i = 0; i < BLOCKS.length * BLOCK_LENGTH; i++) {
-    const date = addDays(START, i);
-    const value = 6 + ((i * 3) % 5) * 0.4; // 6.0 .. 7.6, no real active/blank gap
-    const guess = GUESS_CYCLE[i % GUESS_CYCLE.length];
+  const checkIns = [];
+  for (let i = 0; i < runLength; i++) {
+    const date = isoDate(addDays(START, i));
+    const value = seededValue(i);
+    const guess = GUESS_CYCLE[i % GUESS_CYCLE.length] as PlaceboGuess;
+    checkIns.push({ check_date: date, metric_value: value, placebo_guess: guess });
     await db.query(
       `INSERT INTO check_ins (experiment_id, check_date, metric_value, note, placebo_guess)
        VALUES ($1, $2, $3, $4, $5)`,
-      [experimentId, isoDate(date), value.toFixed(1), null, guess]
+      [experimentId, date, value.toFixed(1), null, guess]
     );
   }
+
+  // The verdict is a real engine output over the seeded data, not hand-authored.
+  const v = computeVerdict({
+    substance_name: "Magnesium glycinate",
+    metric_name: "Sleep quality",
+    metric_type: METRIC_TYPE,
+    metric_direction: METRIC_DIRECTION,
+    block_length_days: BLOCK_LENGTH,
+    num_blocks: BLOCKS.length,
+    num_active_blocks: NUM_ACTIVE,
+    run_length_days: runLength,
+    allocations: allocations.map((a) => ({
+      condition: a.condition,
+      block_start_date: a.block_start_date,
+      block_end_date: a.block_end_date,
+    })),
+    check_ins: checkIns,
+  });
 
   await db.query(
     `INSERT INTO verdicts
        (experiment_id, effect_estimate, effect_units, permutation_p_value,
-        guess_accuracy, guess_p_value_vs_chance, adherence_pct,
-        blind_integrity_flag, power_note, verdict_text)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-    [experimentId, 0.2, "points", 0.42, 0.52, 0.66, 95.2, false, POWER_NOTE, VERDICT_TEXT]
+        p_value_floor, guess_accuracy, guess_p_value_vs_chance, guess_days_scored,
+        guess_days_correct, guess_days_unsure, days_logged, adherence_pct,
+        blind_integrity_flag, power_note, verdict_text, guess_text)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+    [
+      experimentId,
+      v.effect_estimate,
+      v.effect_units,
+      v.permutation_p_value,
+      v.p_value_floor,
+      v.guess_accuracy,
+      v.guess_p_value_vs_chance,
+      v.guess_days_scored,
+      v.guess_days_correct,
+      v.guess_days_unsure,
+      v.days_logged,
+      v.adherence_pct,
+      v.blind_integrity_flag,
+      v.power_note,
+      v.verdict_text,
+      v.guess_text,
+    ]
   );
 
   log.info("demo seed inserted");

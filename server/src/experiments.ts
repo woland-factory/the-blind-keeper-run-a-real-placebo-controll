@@ -6,6 +6,8 @@ import type { MetricType } from "./metrics.js";
 import { minimumDetectableEffect, pValueFloor } from "./power.js";
 import { blocklistMatch } from "./safety/blocklist.js";
 import { getTemplate } from "./templates.js";
+import { computeVerdict } from "./verdict.js";
+import type { Condition, PlaceboGuess, VerdictAllocation, VerdictCheckIn } from "./verdict.js";
 
 // Unambiguous code alphabet: no 0/O/1/I, so a handwritten packet label is never
 // misread.
@@ -794,4 +796,417 @@ export async function getExperimentSummary(
     planned_end_date: row.planned_end_date,
     created_at: row.created_at,
   };
+}
+
+// ---- Unblinding: the second and final intentional allocation reveal. ----
+//
+// The verdict path serves allocation data ONLY when status = 'unblinded'. The
+// status flip is the one-way gate: running (past its last day) -> unblinded.
+// The verdict is computed once by the pure engine, stored, and served unchanged
+// forever after. See section 2.1/2.6.
+
+// The serialized verdict, numbers as numbers. significant and
+// guesses_beat_chance are derived here from the stored p-values.
+export interface VerdictNumbers {
+  effect_estimate: number | null;
+  effect_units: string | null;
+  permutation_p_value: number | null;
+  p_value_floor: number | null;
+  significant: boolean;
+  guess_days_scored: number;
+  guess_days_correct: number;
+  guess_days_unsure: number;
+  guess_accuracy: number | null;
+  guess_p_value_vs_chance: number | null;
+  guesses_beat_chance: boolean;
+  days_logged: number;
+  adherence_pct: number | null;
+  blind_integrity_flag: boolean;
+  power_note: string;
+  verdict_text: string;
+  guess_text: string;
+  computed_at: string;
+}
+
+export interface VerdictView {
+  id: string;
+  status: string;
+  substance_name: string;
+  metric_name: string;
+  metric_type: string;
+  metric_direction: string;
+  num_blocks: number;
+  block_length_days: number;
+  run_length_days: number;
+  verdict: VerdictNumbers;
+  blocks: RevealBlock[];
+}
+
+interface VerdictRow {
+  effect_estimate: string | null;
+  effect_units: string | null;
+  permutation_p_value: string | null;
+  p_value_floor: string | null;
+  guess_accuracy: string | null;
+  guess_p_value_vs_chance: string | null;
+  guess_days_scored: number | null;
+  guess_days_correct: number | null;
+  guess_days_unsure: number | null;
+  days_logged: number | null;
+  adherence_pct: string | null;
+  blind_integrity_flag: boolean | null;
+  power_note: string;
+  verdict_text: string;
+  guess_text: string;
+  computed_at: string;
+}
+
+// numeric columns come back from the driver as strings; ints as numbers. Coerce
+// so the JSON carries real numbers.
+function num(v: string | number | null): number | null {
+  return v === null ? null : Number(v);
+}
+
+function rowToVerdictNumbers(row: VerdictRow): VerdictNumbers {
+  const permutation = num(row.permutation_p_value);
+  const guessP = num(row.guess_p_value_vs_chance);
+  return {
+    effect_estimate: num(row.effect_estimate),
+    effect_units: row.effect_units,
+    permutation_p_value: permutation,
+    p_value_floor: num(row.p_value_floor),
+    significant: permutation !== null && permutation <= 0.05,
+    guess_days_scored: row.guess_days_scored ?? 0,
+    guess_days_correct: row.guess_days_correct ?? 0,
+    guess_days_unsure: row.guess_days_unsure ?? 0,
+    guess_accuracy: num(row.guess_accuracy),
+    guess_p_value_vs_chance: guessP,
+    guesses_beat_chance: guessP !== null && guessP <= 0.05,
+    days_logged: row.days_logged ?? 0,
+    adherence_pct: num(row.adherence_pct),
+    blind_integrity_flag: row.blind_integrity_flag ?? false,
+    power_note: row.power_note,
+    verdict_text: row.verdict_text,
+    guess_text: row.guess_text,
+    computed_at: row.computed_at,
+  };
+}
+
+const VERDICT_COLUMNS = `effect_estimate, effect_units, permutation_p_value, p_value_floor,
+  guess_accuracy, guess_p_value_vs_chance, guess_days_scored, guess_days_correct,
+  guess_days_unsure, days_logged, adherence_pct, blind_integrity_flag,
+  power_note, verdict_text, guess_text, computed_at`;
+
+async function selectVerdictRow(db: Db, experimentId: string): Promise<VerdictRow | null> {
+  const rows = await db.query<VerdictRow>(
+    `SELECT ${VERDICT_COLUMNS} FROM verdicts WHERE experiment_id = $1`,
+    [experimentId]
+  );
+  return rows.length > 0 ? rows[0] : null;
+}
+
+/**
+ * Compute-once: if a verdict row exists, return it. Otherwise load the
+ * allocations and in-window check-ins, run the pure engine, INSERT ON CONFLICT
+ * DO NOTHING (the UNIQUE (experiment_id) constraint makes it race-safe), and
+ * re-select. Determinism makes a lost race harmless: both writers compute
+ * identical numbers. Also heals a crash between the status flip and the insert.
+ */
+export async function ensureVerdict(db: Db, experimentId: string): Promise<VerdictRow> {
+  const existing = await selectVerdictRow(db, experimentId);
+  if (existing) return existing;
+
+  const expRows = await db.query<{
+    substance_name: string;
+    metric_name: string;
+    metric_type: string;
+    metric_direction: string;
+    block_length_days: number;
+    num_blocks: number;
+    num_active_blocks: number;
+  }>(
+    `SELECT substance_name, metric_name, metric_type, metric_direction,
+            block_length_days, num_blocks, num_active_blocks
+       FROM experiments WHERE id = $1`,
+    [experimentId]
+  );
+  const exp = expRows[0];
+
+  const allocRows = await db.query<{
+    condition: string;
+    block_start_date: string;
+    block_end_date: string;
+  }>(
+    `SELECT condition,
+            block_start_date::text AS block_start_date,
+            block_end_date::text AS block_end_date
+       FROM allocations WHERE experiment_id = $1 ORDER BY block_index`,
+    [experimentId]
+  );
+  const allocations: VerdictAllocation[] = allocRows.map((a) => ({
+    condition: a.condition as Condition,
+    block_start_date: a.block_start_date,
+    block_end_date: a.block_end_date,
+  }));
+
+  const checkRows = await db.query<{
+    check_date: string;
+    metric_value: string;
+    placebo_guess: string;
+  }>(
+    `SELECT check_date::text AS check_date, metric_value, placebo_guess
+       FROM check_ins WHERE experiment_id = $1`,
+    [experimentId]
+  );
+  const checkIns: VerdictCheckIn[] = checkRows.map((c) => ({
+    check_date: c.check_date,
+    metric_value: Number(c.metric_value),
+    placebo_guess: c.placebo_guess as PlaceboGuess,
+  }));
+
+  const v = computeVerdict({
+    substance_name: exp.substance_name,
+    metric_name: exp.metric_name,
+    metric_type: exp.metric_type as never,
+    metric_direction: exp.metric_direction as never,
+    block_length_days: exp.block_length_days,
+    num_blocks: exp.num_blocks,
+    num_active_blocks: exp.num_active_blocks,
+    run_length_days: exp.block_length_days * exp.num_blocks,
+    allocations,
+    check_ins: checkIns,
+  });
+
+  await db.query(
+    `INSERT INTO verdicts
+       (experiment_id, effect_estimate, effect_units, permutation_p_value,
+        p_value_floor, guess_accuracy, guess_p_value_vs_chance, guess_days_scored,
+        guess_days_correct, guess_days_unsure, days_logged, adherence_pct,
+        blind_integrity_flag, power_note, verdict_text, guess_text)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+     ON CONFLICT (experiment_id) DO NOTHING`,
+    [
+      experimentId,
+      v.effect_estimate,
+      v.effect_units,
+      v.permutation_p_value,
+      v.p_value_floor,
+      v.guess_accuracy,
+      v.guess_p_value_vs_chance,
+      v.guess_days_scored,
+      v.guess_days_correct,
+      v.guess_days_unsure,
+      v.days_logged,
+      v.adherence_pct,
+      v.blind_integrity_flag,
+      v.power_note,
+      v.verdict_text,
+      v.guess_text,
+    ]
+  );
+
+  const stored = await selectVerdictRow(db, experimentId);
+  // The insert or a racing writer guarantees a row now exists.
+  return stored!;
+}
+
+interface VerdictExperimentRow {
+  id: string;
+  status: string;
+  substance_name: string;
+  metric_name: string;
+  metric_type: string;
+  metric_direction: string;
+  block_length_days: number;
+  num_blocks: number;
+  past_window: boolean;
+}
+
+async function loadVerdictExperiment(
+  db: Db,
+  userId: string,
+  id: string
+): Promise<VerdictExperimentRow | null> {
+  const rows = await db.query<VerdictExperimentRow>(
+    `SELECT id, status, substance_name, metric_name, metric_type, metric_direction,
+            block_length_days, num_blocks,
+            (CURRENT_DATE > planned_end_date) AS past_window
+       FROM experiments WHERE id = $1 AND user_id = $2`,
+    [id, userId]
+  );
+  return rows.length > 0 ? rows[0] : null;
+}
+
+async function buildVerdictView(db: Db, exp: VerdictExperimentRow): Promise<VerdictView> {
+  const row = await ensureVerdict(db, exp.id);
+  const allocations = await db.query<{
+    code: string;
+    condition: string;
+    block_start_date: string;
+    block_end_date: string;
+  }>(
+    `SELECT code, condition,
+            block_start_date::text AS block_start_date,
+            block_end_date::text AS block_end_date
+       FROM allocations WHERE experiment_id = $1 ORDER BY block_index`,
+    [exp.id]
+  );
+  return {
+    id: exp.id,
+    status: exp.status,
+    substance_name: exp.substance_name,
+    metric_name: exp.metric_name,
+    metric_type: exp.metric_type,
+    metric_direction: exp.metric_direction,
+    num_blocks: exp.num_blocks,
+    block_length_days: exp.block_length_days,
+    run_length_days: exp.block_length_days * exp.num_blocks,
+    verdict: rowToVerdictNumbers(row),
+    blocks: allocations.map((a) => ({
+      code: a.code,
+      contents: a.condition === "active" ? exp.substance_name : BLANK,
+      block_start_date: a.block_start_date,
+      block_end_date: a.block_end_date,
+    })),
+  };
+}
+
+/**
+ * Unblind a complete run: flip status to 'unblinded' under a complete-gated,
+ * one-way guard, then compute and serve the verdict. Owner-scoped; a miss
+ * returns null (route -> 404). Idempotent: a second call serves the stored
+ * result. Refuses voided and not-yet-complete runs with a 422.
+ */
+export async function unblindExperiment(
+  db: Db,
+  userId: string,
+  id: string
+): Promise<VerdictView | null> {
+  const exp = await loadVerdictExperiment(db, userId, id);
+  if (!exp) return null;
+
+  if (exp.status === "unblinded") {
+    return buildVerdictView(db, exp);
+  }
+  if (exp.status === "voided") {
+    throw new ExperimentError(422, "invalid_state", "You broke the blind, so this run has no verdict.");
+  }
+  if (exp.status !== "running") {
+    throw new ExperimentError(422, "invalid_state", "This run has not started.");
+  }
+
+  // Flip first, guarded and complete-gated in one statement. Touches only
+  // status, which the 0002 immutability trigger permits.
+  const updated = await db.query<{ id: string }>(
+    `UPDATE experiments
+        SET status = 'unblinded'
+      WHERE id = $1 AND status = 'running' AND CURRENT_DATE > planned_end_date
+      RETURNING id`,
+    [id]
+  );
+  if (updated.length === 0) {
+    // Either a racing request already flipped it, or the run is still going.
+    const after = await loadVerdictExperiment(db, userId, id);
+    if (after && after.status === "unblinded") {
+      return buildVerdictView(db, after);
+    }
+    throw new ExperimentError(422, "invalid_state", "Your run is still going. Finish every block first.");
+  }
+
+  return buildVerdictView(db, { ...exp, status: "unblinded" });
+}
+
+/**
+ * The stored verdict view for an unblinded experiment. Owner-scoped; a miss
+ * returns null (route -> 404). Every non-unblinded status throws 422 with a
+ * status-appropriate message, so a sealed run never leaks its schedule here.
+ */
+export async function getVerdictView(
+  db: Db,
+  userId: string,
+  id: string
+): Promise<VerdictView | null> {
+  const exp = await loadVerdictExperiment(db, userId, id);
+  if (!exp) return null;
+
+  if (exp.status === "unblinded") {
+    return buildVerdictView(db, exp);
+  }
+  if (exp.status === "voided") {
+    throw new ExperimentError(422, "invalid_state", "You broke the blind, so this run has no verdict.");
+  }
+  if (exp.status === "running" && exp.past_window) {
+    throw new ExperimentError(422, "invalid_state", "Your run is complete. Reveal the verdict first.");
+  }
+  throw new ExperimentError(422, "invalid_state", "Finish the run, then reveal the verdict.");
+}
+
+/**
+ * Test/dev scaffolding only (registered under the console mail transport, never
+ * production): shift a running experiment's whole calendar back by one run
+ * length so it reads complete today, and backfill a condition-valued check-in
+ * for every run day that lacks one. Owner-scoped; a miss returns null (route ->
+ * 404). Refuses a non-running experiment with a 422. See section 2.7.
+ */
+export async function devCompleteRun(db: Db, userId: string, id: string): Promise<boolean | null> {
+  const rows = await db.query<{
+    status: string;
+    block_length_days: number;
+    num_blocks: number;
+    metric_type: string;
+    metric_direction: string;
+  }>(
+    `SELECT status, block_length_days, num_blocks, metric_type, metric_direction
+       FROM experiments WHERE id = $1 AND user_id = $2`,
+    [id, userId]
+  );
+  if (rows.length === 0) return null;
+  const exp = rows[0];
+  if (exp.status !== "running") {
+    throw new ExperimentError(422, "invalid_state", "This run has not started.");
+  }
+
+  const runLength = exp.block_length_days * exp.num_blocks;
+
+  // start_date/planned_end_date are outside the frozen-column set and
+  // allocations carry no trigger, so shifting both is legal.
+  await db.query(
+    `UPDATE experiments
+        SET start_date = start_date - $2::int,
+            planned_end_date = planned_end_date - $2::int
+      WHERE id = $1`,
+    [id, runLength]
+  );
+  await db.query(
+    `UPDATE allocations
+        SET block_start_date = block_start_date - $2::int,
+            block_end_date = block_end_date - $2::int
+      WHERE experiment_id = $1`,
+    [id, runLength]
+  );
+
+  // Condition-valued fill so the demo run has real signal. Swap for
+  // lower_better so "better" always lands on the active blocks.
+  const swap = exp.metric_direction === "lower_better";
+  const yesNo = exp.metric_type === "yes_no";
+  const activeValue = yesNo ? (swap ? 0 : 1) : swap ? 3 : 8;
+  const blankValue = yesNo ? (swap ? 1 : 0) : swap ? 8 : 3;
+
+  await db.query(
+    `INSERT INTO check_ins (experiment_id, check_date, metric_value, note, placebo_guess)
+     SELECT $1, d::date,
+            CASE WHEN a.condition = 'active' THEN $2::numeric ELSE $3::numeric END,
+            NULL,
+            a.condition
+       FROM allocations a
+       CROSS JOIN LATERAL generate_series(a.block_start_date, a.block_end_date, interval '1 day') AS d
+      WHERE a.experiment_id = $1
+        AND NOT EXISTS (
+          SELECT 1 FROM check_ins c
+           WHERE c.experiment_id = $1 AND c.check_date = d::date
+        )`,
+    [id, activeValue, blankValue]
+  );
+
+  return true;
 }

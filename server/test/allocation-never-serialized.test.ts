@@ -9,7 +9,14 @@ describe("allocations are never serialized to a client", () => {
   let ctx: TestApp;
 
   beforeAll(async () => {
-    ctx = await buildTestApp();
+    // This suite signs many users in and exercises the full surface; lift the
+    // per-IP limits so the shared limiter does not starve the last specs. Rate
+    // limiting is covered by its own test.
+    ctx = await buildTestApp({
+      RATE_LIMIT_MAX: "10000",
+      AUTH_RATE_LIMIT_MAX: "1000",
+      MUTATION_RATE_LIMIT_MAX: "1000",
+    });
     await runSeed(ctx.db, { info: () => {} });
   });
 
@@ -216,5 +223,73 @@ describe("allocations are never serialized to a client", () => {
     const revealBody = reveal.json() as { status: string; blocks: Array<{ code: string; contents: string }> };
     expect(revealBody.status).toBe("voided");
     for (const code of codes) expect(reveal.body).toContain(code);
+  });
+
+  it("keeps a complete-but-sealed run sealed, revealing the schedule only once unblinded", async () => {
+    const cookie = await signIn(ctx.app, "complete-trust@example.com");
+    const create = await ctx.app.inject({
+      method: "POST",
+      url: "/api/experiments",
+      headers: { cookie },
+      payload: {
+        substance_name: "Theanine",
+        metric_name: "Afternoon focus",
+        metric_type: "rating_0_10",
+        metric_direction: "higher_better",
+        block_length_days: 5,
+        num_blocks: 6,
+        washout_note: "Skip 1 day between blocks.",
+        acknowledged: true,
+      },
+    });
+    const id = create.json().id as string;
+    await ctx.app.inject({ method: "POST", url: `/api/experiments/${id}/confirm-prep`, headers: { cookie } });
+
+    const codes = (
+      await ctx.db.query<{ code: string }>(`SELECT code FROM allocations WHERE experiment_id = $1`, [id])
+    ).map((r) => r.code);
+
+    // Drive the run to complete via the console-only dev route. It stays sealed:
+    // status is still 'running', just past the calendar window.
+    const complete = await ctx.app.inject({ method: "POST", url: `/api/experiments/${id}/complete-run`, headers: { cookie } });
+    expect(complete.statusCode).toBe(200);
+
+    // The blind-safe surfaces still leak nothing on a complete-but-sealed run.
+    const today = await ctx.app.inject({ method: "GET", url: `/api/experiments/${id}/today`, headers: { cookie } });
+    expect(today.json().phase).toBe("complete");
+    const summary = await ctx.app.inject({ method: "GET", url: `/api/experiments/${id}`, headers: { cookie } });
+    // A check-in is refused past the window; the 422 body carries no schedule.
+    const lateCheck = await ctx.app.inject({
+      method: "POST",
+      url: `/api/experiments/${id}/checkins`,
+      headers: { cookie },
+      payload: { metric_value: 6, placebo_guess: "unsure" },
+    });
+    for (const res of [today, summary, lateCheck]) {
+      const body = res.body ?? "";
+      for (const code of codes) expect(body).not.toContain(code);
+      expect(body.toLowerCase()).not.toContain("placebo");
+      expect(body).not.toContain("condition");
+      expect(body).not.toContain("block_start_date");
+      expect(body).not.toContain("block_end_date");
+    }
+
+    // The verdict routes are the second intentional reveal (after break-blind),
+    // and they refuse a sealed run: GET /verdict is 422 and leaks no schedule.
+    const sealedVerdict = await ctx.app.inject({ method: "GET", url: `/api/experiments/${id}/verdict`, headers: { cookie } });
+    expect(sealedVerdict.statusCode).toBe(422);
+    for (const code of codes) expect(sealedVerdict.body).not.toContain(code);
+    expect(sealedVerdict.body.toLowerCase()).not.toContain("placebo");
+
+    // POST /unblind flips status first, and only then reveals the schedule.
+    const unblind = await ctx.app.inject({ method: "POST", url: `/api/experiments/${id}/unblind`, headers: { cookie } });
+    expect(unblind.statusCode).toBe(200);
+    expect(unblind.json().status).toBe("unblinded");
+    for (const code of codes) expect(unblind.body).toContain(code);
+
+    // And GET /verdict now serves the unsealed schedule.
+    const openVerdict = await ctx.app.inject({ method: "GET", url: `/api/experiments/${id}/verdict`, headers: { cookie } });
+    expect(openVerdict.statusCode).toBe(200);
+    for (const code of codes) expect(openVerdict.body).toContain(code);
   });
 });
