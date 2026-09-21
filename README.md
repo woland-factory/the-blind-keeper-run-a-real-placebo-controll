@@ -75,6 +75,16 @@ needs.
 laptop, since the web service is reached through the proxy and does not publish a
 port directly.
 
+On staging the app seeds one demo account (`SEED_DEMO=1`) and prints sign-in
+links to its own logs (`MAIL_TRANSPORT=console`). To see a real finished verdict
+in under a minute:
+
+1. On the landing page, request a sign-in link for `demo@blind-keeper.app`.
+2. Read the link from the app logs (`docker logs` on the web container).
+3. Open it. You land on the demo formulary with one finished run.
+4. Tap the run to read its verdict: a genuine near-null result the engine
+   computed over the seeded data.
+
 ## How it is built
 
 - `server/` is a Fastify API in TypeScript. It owns the database, the
