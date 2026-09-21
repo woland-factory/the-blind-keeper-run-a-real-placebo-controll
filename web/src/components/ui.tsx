@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 
 export function Page({ children }: { children: ReactNode }) {
   return <main className="page">{children}</main>;
@@ -21,12 +21,13 @@ export function Stepper({
   onChange: (next: number) => void;
 }) {
   const clamp = (n: number) => Math.max(min, Math.min(max, n));
+  const labelId = useId();
   return (
     <div className="field">
-      <span className="field-label" id={`${label}-label`}>
+      <span className="field-label" id={labelId}>
         {label}
       </span>
-      <div className="stepper" role="group" aria-labelledby={`${label}-label`}>
+      <div className="stepper" role="group" aria-labelledby={labelId}>
         <button
           type="button"
           className="stepper-btn"
@@ -71,12 +72,13 @@ export function Segmented<T extends string | number>({
   value: T;
   onChange: (next: T) => void;
 }) {
+  const labelId = useId();
   return (
     <div className="field">
-      <span className="field-label" id={`${label}-label`}>
+      <span className="field-label" id={labelId}>
         {label}
       </span>
-      <div className="segmented" role="group" aria-labelledby={`${label}-label`}>
+      <div className="segmented" role="group" aria-labelledby={labelId}>
         {options.map((opt) => (
           <button
             key={String(opt.value)}
