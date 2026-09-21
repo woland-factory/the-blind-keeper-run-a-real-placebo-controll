@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { signIn } from "./helpers.js";
 
 test.describe("designed states", () => {
   test("expired link renders a designed error with a next step", async ({ page }) => {
@@ -36,5 +37,24 @@ test.describe("designed states", () => {
       page.getByText("We keep the schedule secret so you stay blind.", { exact: false })
     ).toBeVisible();
     await expect(page.getByRole("button", { name: "Design a test" })).toBeVisible();
+  });
+
+  test("home holds the layout with a skeleton while the formulary loads", async ({ page }) => {
+    await signIn(page);
+    // Delay the formulary read, then re-mount Home so the skeleton is observable.
+    await page.route("**/api/formulary", async (route) => {
+      await new Promise((r) => setTimeout(r, 1200));
+      await route.continue();
+    });
+    await page.goto("/");
+    await expect(page.locator(".skeleton").first()).toBeVisible();
+  });
+
+  test("home shows a designed error with a retry when the formulary fails", async ({ page }) => {
+    await signIn(page);
+    await page.route("**/api/formulary", (route) => route.abort());
+    await page.goto("/");
+    await expect(page.getByText("We could not load your formulary.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
   });
 });

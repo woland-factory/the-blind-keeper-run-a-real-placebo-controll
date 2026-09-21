@@ -1,5 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildTestApp, signIn, type TestApp } from "./helpers.js";
+import { EXPORT_LIMIT, FORMULARY_LIMIT } from "../src/formulary.js";
+
+describe("formulary read caps", () => {
+  it("caps the list at 100 and the export at 1000", () => {
+    // Hot-path bounds: the list read stays small and the export cannot grow
+    // without limit. Both queries carry these as their LIMIT.
+    expect(FORMULARY_LIMIT).toBe(100);
+    expect(EXPORT_LIMIT).toBe(1000);
+  });
+});
 
 const baseBody = {
   metric_name: "Afternoon focus",
