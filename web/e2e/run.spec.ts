@@ -13,8 +13,8 @@ test.describe("running dashboard", () => {
     expect(codeText).toMatch(/^[A-Z0-9]{3}$/);
 
     // Progress row.
-    await expect(page.getByText("sealed days", { exact: false })).toBeVisible();
-    await expect(page.getByText("days left", { exact: false })).toBeVisible();
+    await expect(page.getByText(/\d+ sealed days?/)).toBeVisible();
+    await expect(page.getByText(/\d+ days? left/)).toBeVisible();
 
     // The check-in form is present.
     await expect(page.getByRole("heading", { name: "Today's check-in" })).toBeVisible();

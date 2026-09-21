@@ -7,6 +7,7 @@ import {
   type FormularyCard,
 } from "../api.js";
 import { ErrorState, LoadingCard, Page } from "../components/ui.js";
+import { plural } from "../plural.js";
 
 type Load =
   | { status: "loading" }
@@ -40,7 +41,7 @@ function statLine(v: NonNullable<FormularyCard["verdict"]>): string[] {
     parts.push(`${signed(v.effect_estimate)} ${v.effect_units ?? ""}, ${formatStatP(v.permutation_p_value)}`.trim());
   }
   if (v.guess_days_scored > 0) {
-    parts.push(`Guessed ${v.guess_days_correct} of ${v.guess_days_scored} days`);
+    parts.push(`Guessed ${v.guess_days_correct} of ${plural(v.guess_days_scored, "day")}`);
   }
   if (v.adherence_pct !== null) {
     parts.push(`Adherence ${v.adherence_pct}%`);

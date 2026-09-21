@@ -11,6 +11,7 @@ import {
   type TodayView,
 } from "../api.js";
 import { ErrorState, LoadingCard, Page, Segmented, Stepper } from "../components/ui.js";
+import { plural } from "../plural.js";
 
 type Load =
   | { status: "loading" }
@@ -276,8 +277,8 @@ function RunDashboard({
       </section>
 
       <p className="run-progress">
-        <span>{today.sealed_day_streak} sealed days</span>
-        <span>{today.days_remaining} days left</span>
+        <span>{plural(today.sealed_day_streak, "sealed day")}</span>
+        <span>{plural(today.days_remaining, "day")} left</span>
       </p>
 
       <section className="card" aria-live="polite">
