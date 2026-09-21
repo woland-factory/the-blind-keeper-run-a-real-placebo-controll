@@ -8,12 +8,15 @@ day you log your score and guess whether that day was the blank. At the end it
 gives you a verdict you did not generate and could not bias: whether the
 supplement beat the blank, and whether you could actually feel the difference.
 
-This repository has the foundation and the experiment designer: accounts,
-passwordless sign-in, the database schema, the mobile-first shell, a demo
-experiment, and the full design flow. Open `/design` to pick a supplement and a
-daily score, see live statistical power as you set the length, then lock the
-plan into a sealed, pre-registered summary. Daily check-ins and the verdict
-engine arrive in later releases.
+This repository has the whole loop. Open `/design` to pick a supplement and a
+daily score and see live statistical power as you set the length, then lock the
+plan into a sealed, pre-registered summary. Prepare your numbered capsules from a
+blind-safe sheet, start the run, and log a short daily check-in with a guess of
+whether that day was the blank. On unblinding day the app computes a deterministic
+verdict: whether the supplement beat the blank, and whether you could actually
+feel the difference. Every finished run lands in a personal formulary you can
+export as JSON, and when you design a new run for a metric you have measured
+before, the power estimate uses your own day-to-day noise.
 
 ## Run it locally
 
