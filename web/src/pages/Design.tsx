@@ -95,6 +95,7 @@ export function Design() {
             block_length_days: blockLengthDays,
             num_blocks: numBlocks,
             template_id: templateId,
+            metric_name: metricName.trim() || undefined,
           },
           controller.signal
         );
@@ -109,7 +110,7 @@ export function Design() {
       clearTimeout(handle);
       controller.abort();
     };
-  }, [loadState, substanceName, metricType, blockLengthDays, numBlocks, templateId]);
+  }, [loadState, substanceName, metricName, metricType, blockLengthDays, numBlocks, templateId]);
 
   function applyTemplate(t: Template) {
     setSubstanceName(t.substance_name);
@@ -289,6 +290,11 @@ export function Design() {
                   This design cannot reach a clear result. Add blocks so the test can decide.
                 </p>
               )}
+              <p className="noise-line">
+                {preview.noise_source === "measured"
+                  ? "This is tuned to the day-to-day noise measured in your past runs of this metric."
+                  : "This uses a typical day-to-day noise. Finish a run of this metric to tune it to you."}
+              </p>
               <p className="fine-print">
                 A short run can miss a small effect. Setting this before you start is what keeps the
                 answer honest.

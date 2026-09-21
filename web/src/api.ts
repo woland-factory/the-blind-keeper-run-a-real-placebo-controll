@@ -75,6 +75,7 @@ export interface PreviewInput {
   block_length_days: number;
   num_blocks: number;
   template_id?: string;
+  metric_name?: string;
 }
 
 export interface Preview {
@@ -85,6 +86,7 @@ export interface Preview {
   mde: number;
   mde_units: string;
   can_reach_significance: boolean;
+  noise_source: "measured" | "assumed";
   safety: { blocked: boolean; matched_term: string | null };
 }
 
@@ -308,6 +310,42 @@ export async function getVerdict(id: string): Promise<VerdictView> {
   const res = await fetch(`/api/experiments/${encodeURIComponent(id)}/verdict`, {
     credentials: "same-origin",
   });
+  if (!res.ok) throw await parseError(res);
+  return res.json();
+}
+
+// The export is a plain same-origin link: the browser sends the session cookie
+// and the attachment downloads without the SPA navigating.
+export const FORMULARY_EXPORT_PATH = "/api/formulary/export";
+
+export interface FormularyCardVerdict {
+  effect_estimate: number | null;
+  effect_units: string | null;
+  permutation_p_value: number | null;
+  significant: boolean;
+  guess_days_correct: number;
+  guess_days_scored: number;
+  guesses_beat_chance: boolean;
+  adherence_pct: number | null;
+}
+
+export interface FormularyCard {
+  id: string;
+  status: string;
+  substance_name: string;
+  metric_name: string;
+  metric_type: MetricType;
+  run_length_days: number;
+  ended_on: string | null;
+  verdict: FormularyCardVerdict | null;
+}
+
+export interface FormularyView {
+  cards: FormularyCard[];
+}
+
+export async function getFormulary(): Promise<FormularyView> {
+  const res = await fetch("/api/formulary", { credentials: "same-origin" });
   if (!res.ok) throw await parseError(res);
   return res.json();
 }

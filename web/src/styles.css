@@ -694,6 +694,102 @@ a:focus-visible,
   font-weight: 600;
 }
 
+/* Design: the noise-source line under the power statement. */
+.noise-line {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+/* Formulary home */
+.formulary-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.formulary-actions .btn {
+  flex: 1 1 0;
+}
+
+.formulary-list {
+  list-style: none;
+  margin: 20px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.formulary-item {
+  margin: 0;
+}
+
+/* Each card is one link. It resets anchor styling and stacks its contents. */
+.formulary-card {
+  margin-top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.formulary-card:active {
+  transform: translateY(1px);
+}
+
+.formulary-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.formulary-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.formulary-sub {
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.formulary-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.formulary-tags .badge,
+.badge-voided {
+  margin-bottom: 0;
+}
+
+.badge-soft {
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--border);
+}
+
+.badge-voided {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+}
+
+.formulary-stat {
+  color: var(--muted);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.formulary-voided {
+  margin: 0;
+  color: var(--ink);
+}
+
 @media (min-width: 600px) {
   h1 {
     font-size: 1.9rem;
