@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { confirmPrep, getPrep, type PrepView } from "../api.js";
 import { ErrorState, LoadingCard, Page } from "../components/ui.js";
+import { markWalkDone } from "../walk.js";
 
 type Load =
   | { status: "loading" }
@@ -82,6 +83,14 @@ export function Prep() {
     void fetchPrep();
   }, [fetchPrep]);
 
+  // A run that already started (here or on another device) is a first success
+  // too, so clear the guided walk when we land on a running run.
+  useEffect(() => {
+    if (load.status === "ready" && load.prep.status === "running") {
+      markWalkDone();
+    }
+  }, [load]);
+
   // The guiding steps, built from the fetched prep. The confirm step is the last
   // step and is rendered specially, so total = guidance steps + 1.
   const steps = useMemo(() => {
@@ -104,6 +113,9 @@ export function Prep() {
     setStartError(null);
     try {
       await confirmPrep(id);
+      // First success: the guided first-run walk is complete once a real run
+      // starts. Clear it so it never appears again for this browser.
+      markWalkDone();
       setStarted(true);
     } catch {
       setStartError("Check your connection and try again.");

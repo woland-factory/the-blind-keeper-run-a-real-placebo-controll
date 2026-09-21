@@ -10,6 +10,7 @@ import {
   type Template,
 } from "../api.js";
 import { ErrorState, LoadingCard, Page, Segmented, Stepper } from "../components/ui.js";
+import { isWalkDone, markWalkDone } from "../walk.js";
 
 const METRIC_TYPE_OPTIONS: Array<{ value: MetricType; label: string }> = [
   { value: "rating_0_10", label: "Rating 0 to 10" },
@@ -29,8 +30,6 @@ const BLOCK_COUNT_OPTIONS = [
   { value: 10, label: "10" },
   { value: 12, label: "12" },
 ];
-
-const WALK_DONE_KEY = "bk_walk_done";
 
 function formatP(p: number): string {
   return p.toLocaleString("en-US", { maximumSignificantDigits: 2 });
@@ -62,7 +61,7 @@ export function Design() {
   const [walkDone, setWalkDone] = useState(true);
 
   useEffect(() => {
-    setWalkDone(localStorage.getItem(WALK_DONE_KEY) === "1");
+    setWalkDone(isWalkDone());
   }, []);
 
   const loadTemplates = useCallback(async () => {
@@ -132,7 +131,7 @@ export function Design() {
     !blocked;
 
   function finishWalk() {
-    localStorage.setItem(WALK_DONE_KEY, "1");
+    markWalkDone();
     setWalkDone(true);
   }
 
@@ -151,7 +150,8 @@ export function Design() {
         washout_note: washoutNote.trim(),
         acknowledged,
       });
-      finishWalk();
+      // The walk survives locking. It clears at first success (a started run,
+      // marked in Prep), never here.
       navigate(`/experiments/${created.id}`);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Check your connection and try again.");
@@ -196,6 +196,7 @@ export function Design() {
               Confirm this is a supplement, not a prescription drug.
             </li>
             <li>Lock your design to seal it.</li>
+            <li>Prepare your capsules and start your run.</li>
           </ol>
           <button type="button" className="btn btn-ghost walk-skip" onClick={finishWalk}>
             Skip
