@@ -292,4 +292,47 @@ describe("allocations are never serialized to a client", () => {
     expect(openVerdict.statusCode).toBe(200);
     for (const code of codes) expect(openVerdict.body).toContain(code);
   });
+
+  it("keeps a sealed (running) run out of the formulary and the export", async () => {
+    const cookie = await signIn(ctx.app, "sealed-formulary@example.com");
+    const create = await ctx.app.inject({
+      method: "POST",
+      url: "/api/experiments",
+      headers: { cookie },
+      payload: {
+        substance_name: "Theanine",
+        metric_name: "Afternoon focus",
+        metric_type: "rating_0_10",
+        metric_direction: "higher_better",
+        block_length_days: 5,
+        num_blocks: 6,
+        washout_note: "Skip 1 day between blocks.",
+        acknowledged: true,
+      },
+    });
+    const id = create.json().id as string;
+    await ctx.app.inject({ method: "POST", url: `/api/experiments/${id}/confirm-prep`, headers: { cookie } });
+    const codes = (
+      await ctx.db.query<{ code: string }>(`SELECT code FROM allocations WHERE experiment_id = $1`, [id])
+    ).map((r) => r.code);
+
+    // The formulary lists finished runs only; a sealed running run is absent and
+    // its schedule (codes, condition, block dates) never crosses the wire.
+    const list = await ctx.app.inject({ method: "GET", url: "/api/formulary", headers: { cookie } });
+    expect(list.statusCode).toBe(200);
+    expect(list.json().cards).toHaveLength(0);
+    const exp = await ctx.app.inject({ method: "GET", url: "/api/formulary/export", headers: { cookie } });
+    expect(exp.statusCode).toBe(200);
+    expect(exp.json().runs).toHaveLength(0);
+
+    for (const res of [list, exp]) {
+      const body = res.body ?? "";
+      expect(body).not.toContain(id);
+      for (const code of codes) expect(body).not.toContain(code);
+      expect(body.toLowerCase()).not.toContain("placebo");
+      expect(body).not.toContain("condition");
+      expect(body).not.toContain("block_start_date");
+      expect(body).not.toContain("block_end_date");
+    }
+  });
 });
