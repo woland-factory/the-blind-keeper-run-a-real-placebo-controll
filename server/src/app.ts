@@ -8,6 +8,7 @@ import { createMailer, type Mailer } from "./mailer.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerMeRoutes } from "./routes/me.js";
 import { registerExperimentRoutes } from "./routes/experiments.js";
+import { registerFormularyRoutes } from "./routes/formulary.js";
 import { errorEnvelope } from "./http.js";
 import type { User } from "./auth.js";
 
@@ -123,6 +124,7 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
   await app.register(registerAuthRoutes);
   await app.register(registerMeRoutes);
   await app.register(registerExperimentRoutes);
+  await app.register(registerFormularyRoutes);
 
   return app;
 }

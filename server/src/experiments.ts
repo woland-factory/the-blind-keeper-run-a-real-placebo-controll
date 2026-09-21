@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Db } from "./db/index.js";
 import { METRIC_TYPES, METRIC_DIRECTIONS, METRIC_UNITS, DEFAULT_WITHIN_SD } from "./metrics.js";
 import type { MetricType } from "./metrics.js";
-import { minimumDetectableEffect, pValueFloor } from "./power.js";
+import { minimumDetectableEffect, pooledWithinSd, pValueFloor } from "./power.js";
 import { blocklistMatch } from "./safety/blocklist.js";
 import { getTemplate } from "./templates.js";
 import { computeVerdict } from "./verdict.js";
@@ -45,6 +45,9 @@ export const previewSchema = z
       .max(MAX_BLOCKS)
       .refine((n) => n % 2 === 0, "even"),
     template_id: z.string().max(40).optional(),
+    // Optional so existing callers are unaffected. When present, the preview
+    // carries the user's measured noise for this exact metric (section 2.5).
+    metric_name: z.string().trim().max(60).optional(),
   })
   .strict();
 
@@ -86,13 +89,26 @@ export interface PreviewResult {
   mde: number;
   mde_units: string;
   can_reach_significance: boolean;
+  noise_source: "measured" | "assumed";
   safety: { blocked: boolean; matched_term: string | null };
 }
 
-export function previewDesign(input: z.infer<typeof previewSchema>): PreviewResult {
+/**
+ * The power preview. When `measured` is a finite number it is the user's own
+ * measured day-to-day noise for this metric, and it drives the MDE in place of
+ * the stated assumption; `noise_source` names which one was used. It estimates
+ * the same quantity `DEFAULT_WITHIN_SD` assumes, so it drops in unchanged.
+ */
+export function previewDesign(
+  input: z.infer<typeof previewSchema>,
+  measured?: number | null
+): PreviewResult {
   const numActive = input.num_blocks / 2;
   const numBlank = input.num_blocks - numActive;
-  const sd = assumedWithinSd(input.metric_type, input.template_id);
+  const useMeasured = typeof measured === "number" && Number.isFinite(measured);
+  const sd = useMeasured
+    ? (measured as number)
+    : assumedWithinSd(input.metric_type, input.template_id);
   const floor = pValueFloor(input.num_blocks, numActive);
   const mde = minimumDetectableEffect({
     assumedWithinSd: sd,
@@ -109,8 +125,51 @@ export function previewDesign(input: z.infer<typeof previewSchema>): PreviewResu
     mde: round1(mde),
     mde_units: METRIC_UNITS[input.metric_type],
     can_reach_significance: floor <= 0.05,
+    noise_source: useMeasured ? "measured" : "assumed",
     safety: { blocked: matched !== null, matched_term: matched },
   };
+}
+
+/**
+ * The user's measured within-person noise for one metric, or null when there is
+ * not enough completed history. Owner-scoped and read-only: it reads only the
+ * requesting user's own `unblinded` runs of this exact metric (voided runs are
+ * excluded, so a broken blind never feeds it), groups the in-block check-ins
+ * into blocks, and returns the pooled within-block SD. Matching on metric_type
+ * AND the case-insensitive, trimmed metric_name is what makes it "the same
+ * metric I measured before".
+ */
+export async function measuredWithinSd(
+  db: Db,
+  userId: string,
+  metricType: string,
+  metricName: string
+): Promise<number | null> {
+  const rows = await db.query<{
+    experiment_id: string;
+    block_index: number;
+    metric_value: string;
+  }>(
+    `SELECT a.experiment_id, a.block_index, c.metric_value
+       FROM experiments e
+       JOIN allocations a ON a.experiment_id = e.id
+       JOIN check_ins   c ON c.experiment_id = e.id
+                         AND c.check_date BETWEEN a.block_start_date AND a.block_end_date
+      WHERE e.user_id = $1
+        AND e.status = 'unblinded'
+        AND e.metric_type = $2
+        AND lower(btrim(e.metric_name)) = lower(btrim($3))`,
+    [userId, metricType, metricName]
+  );
+
+  const byBlock = new Map<string, number[]>();
+  for (const r of rows) {
+    const key = `${r.experiment_id}:${r.block_index}`;
+    const list = byBlock.get(key) ?? [];
+    list.push(Number(r.metric_value));
+    byBlock.set(key, list);
+  }
+  return pooledWithinSd([...byBlock.values()]);
 }
 
 /**

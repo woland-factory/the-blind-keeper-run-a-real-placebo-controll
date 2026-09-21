@@ -14,6 +14,7 @@ import {
   getPrep,
   getToday,
   getVerdictView,
+  measuredWithinSd,
   previewDesign,
   previewSchema,
   submitCheckIn,
@@ -44,7 +45,16 @@ export async function registerExperimentRoutes(app: FastifyInstance): Promise<vo
       if (!parsed.success) {
         return reply.code(400).send(errorEnvelope("invalid_input", "Check the design values and try again."));
       }
-      return reply.send(previewDesign(parsed.data));
+      // Look up the user's measured noise only when a metric name is present.
+      const measured = parsed.data.metric_name
+        ? await measuredWithinSd(
+            app.db,
+            request.user!.id,
+            parsed.data.metric_type,
+            parsed.data.metric_name
+          )
+        : null;
+      return reply.send(previewDesign(parsed.data, measured));
     }
   );
 

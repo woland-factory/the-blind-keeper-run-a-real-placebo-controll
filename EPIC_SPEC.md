@@ -1,4 +1,4 @@
-# EPIC SPEC — Unblinding verdict (the signature moment)
+# EPIC SPEC — Personal formulary, measured-noise carry-forward, and export
 
 ## Quality differentiator (this app must win on it)
 
@@ -6,632 +6,582 @@
 generate and could not bias, and when the data cannot decide, the app says so
 plainly instead of manufacturing confidence.
 
-This epic IS the differentiator's moment of truth. Three rules follow from it:
+What this EPIC's work owes the differentiator:
 
-1. **The verdict is deterministic arithmetic, never generation.** A pure,
-   unit-tested engine (exact permutation test, exact binomial test) computes it
-   once from the stored data. No LLM, no network call, no randomness anywhere
-   in the path. The same data always yields the same verdict.
-2. **A null is read honestly.** When the data cannot separate supplement from
-   blank, the verdict says exactly that, names what size of effect the run
-   could have seen, and never lets "no signal" read as "proven nothing."
-3. **The reveal is earned, gated, and singular.** The schedule and verdict
-   unseal only when the run is complete and the user asks; a voided run never
-   gets one; the result is computed once, stored, and served unchanged forever
-   after. Nothing about the answer can be re-rolled.
-
-The two-part reveal (what the data says, and whether the user could feel it)
-is the interaction users repeat to friends. Section 2.5's templates carry it;
-implement them verbatim.
+1. **The formulary is a ledger, not a highlight reel.** It lists every finished
+   run the same way: the wins, the nulls, and the voided runs where the user
+   cracked and peeked. A voided run stays visible and stays marked voided. The
+   honest record is the point.
+2. **The card repeats the engine, it never re-judges.** Every number and every
+   tag on a formulary card is derived from the stored verdict (the same
+   deterministic engine output the verdict screen shows). No card recomputes, re
+   -rounds against a different rule, or invents a softer label. The list and the
+   verdict screen agree to the digit.
+3. **Carry-forward sharpens honesty, it never inflates it.** When a new design
+   reuses a metric the user has already measured, the power statement swaps the
+   assumed day-to-day noise for the user's own measured noise, and says which one
+   it used. Measuring their real noise makes a future null MORE honest (correctly
+   underpowered), never a manufactured "now it works."
+4. **Isolation is a trust rule, not just a security rule.** Every formulary and
+   export byte is the requesting user's own. No other user's runs, verdicts, or
+   noise can reach the response, proven by test. A sealed (still-running) run's
+   schedule never appears in an export.
 
 ---
 
 ## 1. Scope
 
 ### In scope
-- **Migration `0004`**: extend the existing `verdicts` table with the guess
-  counts, days-logged count, p-value floor, and the part-two text column the
-  screen needs (section 2.2).
-- **The verdict engine** (`server/src/verdict.ts`, new, pure): exact
-  permutation test on block means oriented by `metric_direction`, exact
-  binomial test of guess accuracy versus chance (unsure days excluded and
-  counted), adherence, blind-integrity flag, honest power note reusing
-  `power.ts`, and the deterministic two-part verdict text (section 2.4–2.5).
-- **`POST /api/experiments/:id/unblind`**: allowed only when the run is
-  complete; flips `status` to `unblinded`, computes the verdict once, stores
-  it, and serves it. A second call serves the stored result (section 2.6).
-- **`GET /api/experiments/:id/verdict`**: the stored verdict for an
-  `unblinded` experiment, including the now-unsealed schedule table.
-- **The verdict screen** (`/experiments/:id/verdict`, new page): the two-part
-  reveal, adherence, the blind-integrity reading, the power caveat, and the
-  unsealed schedule, legible at 390px with designed loading/error states
-  (section 2.9).
-- **Wiring the moment**: the run page's `complete` phase becomes the
-  `Reveal the verdict` action; its `unblinded` phase and the locked summary's
-  `unblinded` status link to the verdict screen (section 2.9).
-- **An engine-computed demo verdict**: `seed.ts` stops hand-authoring verdict
-  numbers and computes them with the real engine over its seeded check-ins,
-  so the staging demo's verdict is a true output of the product (2.8).
-- **A dev-only run-completion route** (console mail transport only, never
-  production) so the e2e suite can reach a completed run without waiting 42
-  days (section 2.7).
+
+- **`GET /api/formulary`** (new): the requesting user's finished runs
+  (`unblinded` and `voided`) as cards, newest first, capped, each card carrying
+  substance, metric, effect, guess calibration, adherence, and void status. Every
+  verdict number on a card is derived from the stored `verdicts` row (section
+  2.3).
+- **`GET /api/formulary/export`** (new): a downloadable JSON file of the
+  requesting user's finished runs in full (design fields, the stored verdict, the
+  now-unsealed schedule, and the daily check-ins). Never includes a sealed run
+  (section 2.4).
+- **Measured-noise carry-forward in the power preview** (edit): the design
+  screen's power statement uses the user's measured within-person noise for a
+  metric they have already completed, falls back to the stated assumption when
+  there is no history, and names which one it used (section 2.5).
+- **The formulary screen** (edit `Home.tsx`): the returning user's home lists the
+  formulary cards with an export action and a design action; a brand-new user
+  sees the designed empty state that points to their first experiment (section
+  2.6). The empty-state heading `Start your first blind test` is preserved
+  verbatim.
+- **The design screen's noise line** (edit `Design.tsx`): send the metric name in
+  the preview request and show one line naming measured vs assumed noise (section
+  2.6).
 
 ### Out of scope (do not build — later epics or non-goals)
-- **LLM-written narrative verdicts** (Non-Goal). The verdict text is a fixed
-  deterministic template. No LLM call, no BYOK surface, nothing "optional".
-- **Bayesian model selection** (Non-Goal). One permutation test, one binomial
-  test. No model comparison, no priors, no effect-size shrinkage.
-- **Sharing/publishing** (Non-Goal). No share link, no image export, no
-  copy-to-clipboard card.
-- **The formulary and export** (EPIC 6). No list of past verdicts, no export
-  file. The verdict screen links back to the experiment summary only.
-- **Measured-noise carry-forward** (EPIC 6). The power note uses the same
-  assumed within-person noise as the design screen (`DEFAULT_WITHIN_SD`).
-- **A per-day guess-overlay visualization.** The payload carries the guess
-  counts and the per-block schedule table; a day-by-day chart of guesses over
-  the schedule is a later polish idea, not this epic.
-- **Recomputing or editing a verdict.** No recompute endpoint, no admin
-  override. Determinism plus compute-once is the contract.
-- **Changing EPIC 2's power preview.** The preview endpoint and Design screen
-  are untouched (see the requested-task note on `yes_no` units in the run
-  summary; do not fix it here).
+
+- **Public N=1 commons / registry** (Non-Goal). No publishing, no shared list, no
+  discoverable runs.
+- **Cross-user aggregation** (Non-Goal). No pooling of noise, effects, or counts
+  across users. Every query in this EPIC is scoped to one user id.
+- **Social sharing** (Non-Goal). No share link, no share image, no
+  copy-to-clipboard card, no export-to-social.
+- **A guided first-run walkthrough** (EPIC 7). The formulary empty state is a
+  designed state with one clear action; the multi-step guided path is the polish
+  EPIC's job, not this one.
+- **An "active runs" dashboard.** The formulary is finished runs only
+  (`unblinded` + `voided`), exactly as the acceptance criteria state. Listing
+  in-progress (`prepped`/`running`) experiments on the home screen is a
+  pre-existing gap and stays out of scope (see the requested-task note).
+- **New verdict math, recompute, or editing.** The card and export read the
+  stored verdict unchanged. Nothing here recomputes or mutates a verdict.
+- **Changing the verdict screen, the run loop, or the unblind path.** Those
+  shipped in EPIC 4/5 and are untouched.
+- **CSV export.** The acceptance criterion allows "JSON and/or CSV"; this EPIC
+  ships one portable format (JSON), which is lossless for the nested
+  run/verdict/schedule/check-in shape. No CSV.
+- **A database migration.** The formulary, export, and measured noise are all
+  reads over the existing tables. Add no migration (forward-only means no empty
+  or speculative migration file).
+- **Enriching the demo seed** (extra completed runs, a voided demo run). The seed
+  stays exactly as EPIC 5 left it (one unblinded run); `seed.test.ts` asserts
+  exactly one experiment and must keep passing. See the requested-task note.
 
 ---
 
 ## 2. Technical design
 
-Build on EPIC 1–4 exactly as it stands. Reuse: the `Db` interface
-(`server/src/db/index.ts`), zod at the boundary, `errorEnvelope` and
-`requireAuth` (`server/src/http.ts`), `ExperimentError`, the owner-scoped
-`WHERE id = $1 AND user_id = $2` pattern and the "miss returns null → route
-answers 404" convention (`server/src/experiments.ts`), `idSchema` and
-`mutationLimit` (`server/src/routes/experiments.ts`), `combinations`,
-`pValueFloor`, and `minimumDetectableEffect` (`server/src/power.ts`),
-`METRIC_UNITS` and `DEFAULT_WITHIN_SD` (`server/src/metrics.ts`), the
-frontend `api.ts` client, and `Page` / `LoadingCard` / `ErrorState` with the
-existing mobile-first CSS. Introduce no new dependencies.
+Build on EPIC 1–5 exactly as it stands. Reuse: the `Db` interface
+(`server/src/db/index.js`), zod at the boundary, `errorEnvelope` and
+`requireAuth` (`server/src/http.js`), the owner-scoped `WHERE ... user_id = $1`
+pattern and the "miss returns null → route answers 404" convention
+(`server/src/experiments.ts`), `minimumDetectableEffect` and the `combinations`
+family (`server/src/power.js`), `METRIC_UNITS` / `DEFAULT_WITHIN_SD`
+(`server/src/metrics.js`), the frontend `api.ts` client, and `Page` /
+`LoadingCard` / `ErrorState` with the existing mobile-first CSS. Introduce no new
+dependencies. No LLM anywhere: nothing in this EPIC generates text.
 
-### 2.1 The reveal rule at unblinding (read first, binding)
+### 2.1 Read model, isolation, and the sealed-run rule (read first, binding)
 
-EPIC 4 established the trust invariant: while an experiment is sealed, no
-code-to-condition mapping, no code-to-day schedule, and no condition label
-ever leaves the server. This epic adds the second and final intentional
-reveal (after break-blind) and must not widen anything else:
+1. **Every query is owner-scoped.** The formulary list, the export, and the
+   measured-noise lookup all filter `WHERE ... user_id = $1` using
+   `request.user!.id`. No path accepts a user id, email, or experiment id from
+   the client that would widen the scope. Cross-user reachability is a defect,
+   proven absent by test.
+2. **Only finished runs are ever serialized here.** The formulary and the export
+   return experiments with `status IN ('unblinded', 'voided')` only. A
+   `prepped` or `running` experiment (its schedule still sealed) must never appear
+   in a formulary card or an export, because both surfaces reveal the allocation
+   (condition + block dates). This EPIC adds no new intentional reveal: it reuses
+   the two that EPIC 4/5 already gated (break-blind voids; unblind completes).
+   Extend `allocation-never-serialized.test` to assert a sealed run never appears
+   in `GET /formulary` or `GET /formulary/export`.
+3. **The card never re-judges.** `significant` and `guesses_beat_chance` on a
+   card are derived from the stored p-values with the SAME rule the verdict view
+   uses (`p !== null && p <= 0.05`). No card applies a different threshold,
+   rounds a stored number again, or produces a label the verdict screen would
+   contradict.
+4. **Measured noise is per-user and read-only.** It is computed from the
+   requesting user's own completed (`unblinded`) runs of the same metric. Voided
+   runs never feed it (their blind was broken, their data is compromised). It
+   changes only the power preview; it never rewrites a stored verdict or a past
+   power note.
 
-1. **The verdict path serves allocation data ONLY for `status = 'unblinded'`.**
-   `GET /verdict` returns 422 for every other status. `POST /unblind` flips
-   the status first, under a guard, and only then serves the reveal. There is
-   no state in which a sealed experiment's schedule or conditions can cross
-   the wire through these routes.
-2. **The status flip is the gate, and it is one-way.** `running` (past its
-   last day) → `unblinded` via a guarded single-row update. `voided` never
-   becomes `unblinded`; `unblinded` never becomes anything else. Break-blind
-   already refuses `unblinded` runs, so the two reveals cannot both fire.
-3. **`GET /today`, `GET /prep`, `GET /:id`, and the check-in response are
-   untouched.** Extend `allocation-never-serialized.test` to name the verdict
-   routes as the second intentional exception and to prove they refuse a
-   sealed run.
-4. **The engine is pure and offline.** `server/src/verdict.ts` imports no
-   HTTP client, reads no env, calls no external service. A test stubs global
-   `fetch` to throw and runs the whole unblind path to prove no network call
-   happens (this is how "no LLM anywhere in the verdict path" is made
-   provable, alongside the no-new-dependencies rule).
-
-### 2.2 Migration `0004_verdict.sql` (new, forward-only)
-
-The `verdicts` table exists since `0001` with the core columns
-(`effect_estimate`, `effect_units`, `permutation_p_value`, `guess_accuracy`,
-`guess_p_value_vs_chance`, `adherence_pct`, `blind_integrity_flag`,
-`power_note`, `verdict_text`, `computed_at`, and `UNIQUE (experiment_id)`).
-Add what the two-part screen needs. Never edit an applied migration; this is
-a new file after `0003`.
-
-```sql
--- 0004_verdict.sql: the verdict screen shows counts, not just rates, and the
--- reveal has two text parts. Store them at compute time so the stored verdict
--- is the whole answer. Forward-only.
-
-ALTER TABLE verdicts ADD COLUMN guess_text        text;
-ALTER TABLE verdicts ADD COLUMN guess_days_scored  int;
-ALTER TABLE verdicts ADD COLUMN guess_days_correct int;
-ALTER TABLE verdicts ADD COLUMN guess_days_unsure  int;
-ALTER TABLE verdicts ADD COLUMN days_logged        int;
-ALTER TABLE verdicts ADD COLUMN p_value_floor      numeric;
-```
-
-No index is needed: every verdict read is by `experiment_id`, which is
-`UNIQUE` already. `experiments.status` writes stay within the columns the
-`0002` immutability trigger permits.
-
-### 2.3 New / changed files
+### 2.2 New / changed files
 
 **Server**
-- `server/migrations/0004_verdict.sql` (new) — section 2.2.
-- `server/src/verdict.ts` (new) — the pure engine: `permutationTest`,
-  `binomialTestVsChance`, `computeVerdict`, and the text/format helpers of
-  2.5. No I/O, no imports beyond `power.ts` and `metrics.ts`.
-- `server/src/experiments.ts` (edit) — add `unblindExperiment`,
-  `getVerdictView`, and a shared `ensureVerdict` helper (2.6). Leave every
-  existing function untouched.
-- `server/src/routes/experiments.ts` (edit) — add the two verdict routes and
-  the dev completion route (2.6, 2.7), reusing `idSchema`, `requireAuth`, and
-  `mutationLimit` for the mutation.
-- `server/src/seed.ts` (edit) — compute the demo verdict with the engine
-  (2.8).
+- `server/src/formulary.ts` (new) — `listFormulary` and `buildExport`: the two
+  owner-scoped read models (sections 2.3, 2.4). Pure of HTTP; takes `Db`,
+  `userId` (and the user's email for the export envelope).
+- `server/src/routes/formulary.ts` (new) — `registerFormularyRoutes`: the two
+  GET routes, `requireAuth`, global limiter, `errorEnvelope` on failure.
+- `server/src/app.ts` (edit) — register `registerFormularyRoutes` alongside the
+  existing route registrations.
+- `server/src/power.ts` (edit) — add the pure `pooledWithinSd` helper and the
+  `MIN_NOISE_DF` constant (section 2.5). Leave the existing functions untouched.
+- `server/src/experiments.ts` (edit) — add `measuredWithinSd` (a Db read) and
+  thread an optional measured SD through `previewDesign`; extend `previewSchema`
+  with an optional `metric_name`; add `noise_source` to `PreviewResult` (section
+  2.5). Leave every other function untouched.
+- `server/src/routes/experiments.ts` (edit, minimal) — in the existing
+  `/api/experiments/preview` handler, look up the measured SD when a metric name
+  is present and pass it to `previewDesign`.
 
 **Web**
-- `web/src/pages/Verdict.tsx` (new) — the verdict screen (2.9).
-- `web/src/pages/Run.tsx` (edit) — the `complete` phase becomes the reveal
-  action; the `unblinded` phase links to the verdict (2.9).
-- `web/src/pages/ExperimentLocked.tsx` (edit, minimal) — an `unblinded`
-  branch with a `See the verdict` action (2.9).
-- `web/src/App.tsx` (edit) — route `/experiments/:id/verdict` → `Verdict`.
-- `web/src/api.ts` (edit) — `unblind`, `getVerdict`, and the `VerdictView`
-  types.
-- `web/src/styles.css` (edit) — verdict-screen styles (the two reveal cards,
-  the stat rows, the schedule table reuse), mobile-first at 390px, existing
-  CSS variables only.
+- `web/src/pages/Home.tsx` (edit) — fetch and render the formulary; keep the
+  empty state and its `Start your first blind test` heading verbatim (section
+  2.6).
+- `web/src/pages/Design.tsx` (edit) — send `metric_name` in the preview request;
+  render the noise-source line (section 2.6).
+- `web/src/api.ts` (edit) — `getFormulary` + `FormularyCard`/`FormularyView`
+  types; add `metric_name` to `PreviewInput` and `noise_source` to `Preview`; the
+  export is a plain same-origin link, so no client function is required (a
+  `FORMULARY_EXPORT_PATH` constant is fine).
+- `web/src/styles.css` (edit) — formulary card and list styles, mobile-first at
+  390px, using the existing CSS variables only. Reuse `.card`, `.badge`,
+  `.empty-state`, `.btn` families.
 
 **Tests** — see section 4.
 
-### 2.4 The verdict engine (`server/src/verdict.ts`) — exact definitions
+### 2.3 `GET /api/formulary` — the card list
 
-All functions are pure and deterministic. `Math.random` and any RNG are
-forbidden; the permutation test enumerates exactly.
+`listFormulary(db, userId)` returns the user's finished runs newest first,
+capped at `FORMULARY_LIMIT = 100` (a hot read; the cap keeps it bounded — a real
+user has a handful of lifetime runs, and the query is covered by the existing
+`experiments_user_id_idx`). No new index.
 
-**Inputs to `computeVerdict`** (plain values, no Db): the experiment's
-`substance_name`, `metric_name`, `metric_type`, `metric_direction`,
-`block_length_days`, `num_blocks`, `num_active_blocks`, `run_length_days`,
-the allocations (`condition`, `block_start_date`, `block_end_date` per
-block), and the check-ins (`check_date`, `metric_value`, `placebo_guess`).
+Query (single statement, left join so voided runs with no verdict still appear):
 
-**Windowing.** Only check-ins with `check_date` inside
-`[start_date, planned_end_date]` count anywhere below (a stray row outside
-the window, possible after the dev completion shift of 2.7, is ignored).
+```sql
+SELECT e.id, e.status, e.substance_name, e.metric_name, e.metric_type,
+       e.block_length_days, e.num_blocks,
+       e.planned_end_date::text AS planned_end_date,
+       e.broke_blind_at::text   AS broke_blind_at,
+       v.effect_estimate, v.effect_units, v.permutation_p_value,
+       v.guess_p_value_vs_chance, v.guess_days_correct, v.guess_days_scored,
+       v.adherence_pct
+  FROM experiments e
+  LEFT JOIN verdicts v ON v.experiment_id = e.id
+ WHERE e.user_id = $1
+   AND e.status IN ('unblinded', 'voided')
+ ORDER BY COALESCE(v.computed_at, e.broke_blind_at, e.created_at) DESC
+ LIMIT $2
+```
 
-**Adherence.**
-- `days_logged` = number of in-window check-ins (one per day by the DB
-  constraint).
-- `adherence_pct` = `round1(100 * days_logged / run_length_days)`.
-
-**Block means and the effect.**
-- A block's mean = mean of `metric_value` over its in-window check-ins with
-  `block_start_date <= check_date <= block_end_date`. A block with zero
-  check-ins is EXCLUDED from the effect test (it has no mean).
-- If the included blocks contain zero `active` blocks or zero `placebo`
-  blocks, the effect cannot be computed: `effect_estimate`,
-  `permutation_p_value`, and `p_value_floor` are `null` and the verdict text
-  takes the insufficient-data branch (2.5). Guess scoring and adherence still
-  compute.
-- Otherwise `raw_effect` = mean(active block means) − mean(blank block
-  means), in the metric's raw units.
-- **`yes_no` conversion**: for `metric_type = 'yes_no'`, multiply the effect
-  (and the power note's MDE) by 100 and report in `percentage points`
-  (`METRIC_UNITS.yes_no`). Every other type reports raw with its
-  `METRIC_UNITS` label.
-- `effect_estimate` stored = `round1` of the (converted) signed effect,
-  sign convention active minus blank.
-
-**The permutation test (`permutationTest`).**
-- Test statistic, oriented so that positive means "the supplement helped":
-  `oriented(labeling)` = (mean of blocks labeled active − mean of blocks
-  labeled blank), negated when `metric_direction = 'lower_better'`.
-- Enumerate ALL `C(m, a)` labelings of the `m` included blocks with `a`
-  active labels, where `a` is the number of included blocks that are truly
-  active (use an iterative index-combination generator; `C(12, 6) = 924` is
-  the worst case, so brute force is fine).
-- One-sided p-value = (number of labelings with
-  `oriented(labeling) >= oriented(observed)`) / `C(m, a)`. Ties count; the
-  identity labeling always counts, so `p >= 1 / C(m, a)` — the floor the
-  design screen promised. Six balanced blocks give `C(6,3) = 20` and a floor
-  of exactly `0.05`.
-- `p_value_floor` stored = `1 / C(m, a)` for the INCLUDED blocks (equals
-  `pValueFloor(num_blocks, num_active_blocks)` when every block has data).
-- `significant` (derived, not stored) = `permutation_p_value <= 0.05`.
-
-**The guess test (`binomialTestVsChance`).**
-- For each in-window check-in, find its block by date. Days with
-  `placebo_guess = 'unsure'` are excluded and counted as
-  `guess_days_unsure`. The rest are scored: correct when the guess equals
-  the block's condition (`'active'` ↔ active, `'placebo'` ↔ placebo).
-- `guess_days_scored` = scored days, `guess_days_correct` = correct days,
-  `guess_accuracy` = correct / scored (null when scored = 0).
-- One-sided exact binomial versus chance 0.5:
-  `guess_p_value_vs_chance` = `sum(C(n, i) for i = k..n) / 2^n` with
-  `n = guess_days_scored`, `k = guess_days_correct` (null when n = 0). Use
-  `combinations` from `power.ts`; for n beyond safe-integer territory this
-  never occurs (n <= 12 * 14 = 168 days; compute the sum in floating point
-  via the ratio form `C(n,i)/2^n` accumulated iteratively to avoid overflow —
-  spec: implement the term iteratively, `term(i+1) = term(i) * (n-i)/(i+1)`,
-  starting from `term(0) = 0.5^n` computed as `Math.pow(0.5, n)`).
-- `guesses_beat_chance` (derived) = `guess_p_value_vs_chance !== null && <= 0.05`.
-- `blind_integrity_flag` stored = `guesses_beat_chance`.
-
-**The power note.** Reuse `minimumDetectableEffect` with
-`DEFAULT_WITHIN_SD[metric_type]` (the same stated assumption the design
-screen used; measured noise is EPIC 6) over the DESIGNED blocks
-(`num_active_blocks`, `num_blocks - num_active_blocks`,
-`block_length_days`), `yes_no` converted per above, `round1`. Compose the
-`power_note` text of 2.5 with that MDE and
-`pValueFloor(num_blocks, num_active_blocks)`.
-
-**Output.** `computeVerdict` returns every stored column of the `verdicts`
-table (2.2 plus the originals) as one object. `verdict_text` and
-`guess_text` come from the templates in 2.5. `computed_at` is left to the
-DB default.
-
-### 2.5 Verdict text and formatting (verbatim, deterministic, swept clean)
-
-Formatting helpers (unit-tested, exported from `verdict.ts`):
-- `round1(n)`: one decimal, as elsewhere in the codebase.
-- `luckPhrase(p)`: `p >= 0.001` → `about {pct} of the time` where `pct` is
-  `p * 100` rounded to a whole percent when `>= 1` (`0.05` → `5%`, `0.25` →
-  `25%`) and to one decimal when `< 1` (`0.0036` → `0.4%`); `p < 0.001` →
-  `fewer than 1 time in 1000`.
-- Direction word: for the effect sentence, `higher` when the signed effect is
-  positive, `lower` when negative; use the absolute `round1` value with it.
-
-**`verdict_text` (part one, the effect):**
-- Effect computed and `permutation_p_value <= 0.05`:
-  `{substance_name} moved your {metric_name}. Supplement days ran about {X} {units} {higher|lower} than blank days. Luck alone does that {luckPhrase(p)}.`
-- Effect computed, not significant, `|effect| rounds to 0.0`:
-  `Your {metric_name} could not tell {substance_name} from a blank. Supplement and blank days ran about even.`
-- Effect computed, not significant, otherwise:
-  `Your {metric_name} could not tell {substance_name} from a blank. Supplement days ran about {X} {units} {higher|lower}, well within luck.`
-- Effect not computable (insufficient data):
-  `Too few days were logged to test {substance_name} against a blank. Log more days next run.`
-
-**`guess_text` (part two, could you feel it):**
-- `guess_days_scored = 0`:
-  `You marked every day unsure, so this run cannot score your guesses.`
-- `guesses_beat_chance`:
-  `You felt it. You guessed right on {C} of {S} days. A coin gets about half.`
-- Otherwise:
-  `Your guesses matched a coin flip: right on {C} of {S} days.`
-
-**`power_note`:**
-`A run this size can reliably notice a change of about {mde} {units} or larger, given a typical amount of day-to-day noise. With {num_blocks} blocks, the strongest possible evidence is p = {floor}. Read a quiet result as "not enough signal," never as "proven nothing."`
-(`floor` printed as the plain decimal of
-`pValueFloor(num_blocks, num_active_blocks)`, e.g. `0.05`.)
-
-These strings are the stored, immutable verdict. They must pass the
-mechanical copy sweep exactly as written (no em-dashes, no banned
-vocabulary; the honest negations above are verdict statements, not
-empty-state filler, and stay as written). The screen-only strings live in
-2.10.
-
-### 2.6 Unblinding and serving (`experiments.ts` + routes)
-
-**`ensureVerdict(db, experimentId)`** (internal): if a `verdicts` row exists
-for the experiment, return it. Otherwise load allocations and in-window
-check-ins, call `computeVerdict`, `INSERT ... ON CONFLICT (experiment_id) DO
-NOTHING`, and re-select. The `UNIQUE (experiment_id)` constraint makes
-compute-once race-safe, and determinism makes a lost race harmless: both
-writers computed identical numbers. Also heals the crash window between a
-status flip and the verdict insert.
-
-**`unblindExperiment(db, userId, id)`**, owner-scoped:
-1. Load the experiment (`WHERE id = $1 AND user_id = $2`); a miss returns
-   `null` (route → 404).
-2. If `status = 'unblinded'`: return `getVerdictView` (idempotent; serves the
-   stored result, `computed_at` untouched).
-3. If `status = 'voided'`: throw
-   `ExperimentError(422, "invalid_state", "You broke the blind, so this run has no verdict.")`.
-4. If `status = 'prepped'` (or any other non-running):
-   `ExperimentError(422, "invalid_state", "This run has not started.")`.
-5. If `status = 'running'`: flip first, guarded and complete-gated in one
-   statement:
-   `UPDATE experiments SET status = 'unblinded' WHERE id = $1 AND status = 'running' AND CURRENT_DATE > planned_end_date`.
-   - 0 rows and a re-read shows `unblinded`: another request won the race;
-     fall through to serve the stored verdict.
-   - 0 rows otherwise (still inside the calendar window):
-     `ExperimentError(422, "invalid_state", "Your run is still going. Finish every block first.")`.
-   - 1 row: `ensureVerdict`, then return `getVerdictView`.
-   The update touches only `status`, which the `0002` trigger permits.
-
-**`getVerdictView(db, userId, id)`**, owner-scoped: a miss returns `null`
-(route → 404). When `status != 'unblinded'`, throw
-`ExperimentError(422, "invalid_state", ...)` with:
-- `voided` → `You broke the blind, so this run has no verdict.`
-- `running` past its window → `Your run is complete. Reveal the verdict first.`
-- anything else → `Finish the run, then reveal the verdict.`
-When `unblinded`: `ensureVerdict`, then return exactly this shape (the route
-sends it verbatim; dates cast `::text` as elsewhere):
+Numeric columns come back from the driver as strings; coerce with `Number(...)`
+(mirror the `num()` helper pattern in `experiments.ts`, which returns `null` for
+`null`). The route sends `{ "cards": FormularyCard[] }`. Each card:
 
 ```json
 {
   "id": "uuid",
   "status": "unblinded",
-  "substance_name": "Theanine",
-  "metric_name": "Afternoon focus",
+  "substance_name": "Magnesium glycinate",
+  "metric_name": "Sleep quality",
   "metric_type": "rating_0_10",
-  "metric_direction": "higher_better",
-  "num_blocks": 6,
-  "block_length_days": 7,
   "run_length_days": 42,
+  "ended_on": "2026-08-11",
   "verdict": {
     "effect_estimate": 0.2,
     "effect_units": "points",
     "permutation_p_value": 0.42,
-    "p_value_floor": 0.05,
     "significant": false,
-    "guess_days_scored": 30,
     "guess_days_correct": 16,
-    "guess_days_unsure": 12,
-    "guess_accuracy": 0.533,
-    "guess_p_value_vs_chance": 0.43,
+    "guess_days_scored": 30,
     "guesses_beat_chance": false,
-    "days_logged": 42,
-    "adherence_pct": 100,
-    "blind_integrity_flag": false,
-    "power_note": "…",
-    "verdict_text": "…",
-    "guess_text": "…",
-    "computed_at": "2026-09-15T10:22:00.000Z"
-  },
-  "blocks": [
-    { "code": "MQ7", "contents": "Theanine", "block_start_date": "2026-08-04", "block_end_date": "2026-08-10" }
+    "adherence_pct": 100
+  }
+}
+```
+
+Rules:
+- `run_length_days` = `block_length_days * num_blocks`.
+- `ended_on` = `planned_end_date` for an `unblinded` run; the date part of
+  `broke_blind_at` for a `voided` run. Serve as `"YYYY-MM-DD"`.
+- `verdict` is `null` for a `voided` run (no verdict row). It is also `null`
+  defensively if an `unblinded` run somehow has no verdict row (should not
+  happen; the card then renders as insufficient-data rather than crashing).
+- `significant` = `permutation_p_value !== null && permutation_p_value <= 0.05`.
+  `guesses_beat_chance` = `guess_p_value_vs_chance !== null &&
+  guess_p_value_vs_chance <= 0.05`. Identical to `rowToVerdictNumbers`.
+- Fields the card does not use (raw guess p-value, etc.) are omitted to keep the
+  payload lean; the full detail is on the verdict screen and in the export.
+
+### 2.4 `GET /api/formulary/export` — the portable file
+
+`buildExport(db, userId, email)` returns the user's finished runs in full. The
+route sets:
+- `Content-Type: application/json; charset=utf-8`
+- `Content-Disposition: attachment; filename="blind-keeper-export.json"`
+- Body = the object below (send with `reply.header(...)` then `reply.send(obj)`).
+
+Cap the run count at `EXPORT_LIMIT = 1000` newest-first (a safety bound so the
+endpoint cannot grow without limit; a real user never reaches it). Check-ins per
+run are naturally bounded by the run length.
+
+```json
+{
+  "schema_version": 1,
+  "exported_for": "you@example.com",
+  "runs": [
+    {
+      "id": "uuid",
+      "status": "unblinded",
+      "substance_name": "Magnesium glycinate",
+      "metric_name": "Sleep quality",
+      "metric_type": "rating_0_10",
+      "metric_direction": "higher_better",
+      "block_length_days": 7,
+      "num_blocks": 6,
+      "num_active_blocks": 3,
+      "run_length_days": 42,
+      "washout_note": "…",
+      "pre_registered_at": "2026-07-01T…Z",
+      "start_date": "2026-07-01",
+      "planned_end_date": "2026-08-11",
+      "broke_blind_at": null,
+      "verdict": {
+        "effect_estimate": 0.2, "effect_units": "points",
+        "permutation_p_value": 0.42, "p_value_floor": 0.05,
+        "guess_accuracy": 0.533, "guess_p_value_vs_chance": 0.43,
+        "guess_days_scored": 30, "guess_days_correct": 16,
+        "guess_days_unsure": 12, "days_logged": 42, "adherence_pct": 100,
+        "blind_integrity_flag": false, "power_note": "…",
+        "verdict_text": "…", "guess_text": "…", "computed_at": "2026-08-11T…Z"
+      },
+      "schedule": [
+        { "code": "MQ7", "condition": "placebo", "contents": "Blank",
+          "block_start_date": "2026-07-01", "block_end_date": "2026-07-07" }
+      ],
+      "check_ins": [
+        { "check_date": "2026-07-01", "metric_value": 6.4, "note": null,
+          "placebo_guess": "placebo" }
+      ]
+    }
   ]
 }
 ```
 
-`blocks` reuses the break-blind reveal mapping (`active` →
-`substance_name`, `placebo` → `Blank`, `block_index` order) — the run is
-unblinded, and showing the schedule is what lets the user check the verdict
-against their own memory, which is the trust bar in action. `significant` and
-`guesses_beat_chance` are derived from the stored p-values at serialization.
-Numeric columns come back from the driver as strings for `numeric` types:
-coerce with `Number(...)` in the view builder so the JSON carries numbers
-(match how existing code handles `metric_value` if it does; verify at
-implementation).
+Rules:
+- `runs` includes ONLY `unblinded` and `voided` experiments for `user_id = $1`,
+  newest first (same ordering as the list). A `prepped`/`running` run and its
+  allocation NEVER appear (section 2.1 rule 2), proven by test.
+- `verdict` is the full stored verdict for an `unblinded` run, `null` for a
+  `voided` run.
+- `schedule` reuses the break-blind reveal mapping (`active` → substance name,
+  `placebo` → `Blank`, in `block_index` order); it is safe here because both
+  exported statuses have already had their blind revealed.
+- `check_ins` carries the user's own daily rows (date, value, note, guess) so the
+  file is a real personal evidence base, not just a summary. Coerce
+  `metric_value` to a number.
+- `exported_for` is the requesting user's own email (their own data; this is not
+  a log, so the no-PII-in-logs rule is not in play). Do not include any other
+  identifier.
+- Numeric columns coerced to numbers; dates cast `::text` as elsewhere.
 
-**Routes** (in `routes/experiments.ts`; `:id` via `idSchema`, misses and
-non-uuids → 404, standard `errorEnvelope` everywhere, 401 without a
-session):
+Implementation note: gather the runs, then their allocations and check-ins,
+scoped by the run ids you already fetched for this user (or a single query with
+ordered client-side grouping). Keep it simple; the volume is one user's finished
+runs.
 
-- **`POST /api/experiments/:id/unblind`** — `requireAuth` + `mutationLimit`.
-  No request body (ignore any). 200 with the verdict view on success (first
-  call and every later call); 422 per the state matrix above; 404 when not
-  owned/found.
-- **`GET /api/experiments/:id/verdict`** — `requireAuth`, global limiter.
-  200 with the verdict view when `unblinded`; 422 per the matrix; 404 when
-  not owned/found.
+### 2.5 Measured-noise carry-forward (the power preview)
 
-### 2.7 Dev-only completion route (test scaffolding, never production)
+**Pure helper (`power.ts`).** Add:
 
-The e2e suite must exercise the real signature moment (complete run → reveal
-→ verdict) without a 42-day wait. Mirror the `last-magic-link` precedent, but
-gated STRICTLY on the console mail transport (never the
-`E2E_EXPOSE_MAGIC_LINK` escape, so it cannot exist on staging or
-production):
+```ts
+export const MIN_NOISE_DF = 4;
 
-```
-if (app.env.mailTransport === "console") {
-  app.post("/api/experiments/:id/complete-run", { preHandler: requireAuth }, ...)
+/**
+ * Pooled within-block standard deviation across completed blocks: the user's
+ * measured day-to-day noise for a metric. `blocks` is one array of daily metric
+ * values per block that has data. Blocks with fewer than two values carry no
+ * within-block deviation and are skipped. Returns null when the pooled residual
+ * degrees of freedom fall below MIN_NOISE_DF or the spread is zero, so a flimsy
+ * or degenerate history falls back to the stated assumption.
+ */
+export function pooledWithinSd(blocks: number[][]): number | null {
+  let ss = 0;
+  let df = 0;
+  for (const values of blocks) {
+    if (values.length < 2) continue;
+    const m = values.reduce((s, v) => s + v, 0) / values.length;
+    for (const v of values) ss += (v - m) ** 2;
+    df += values.length - 1;
+  }
+  if (df < MIN_NOISE_DF || ss <= 0) return null;
+  return Math.sqrt(ss / df);
 }
 ```
 
-Register it under `/api/experiments/:id/complete-run` inside the same
-console-only guard style, owner-scoped like every other experiment route
-(404 on a miss). Behavior, only for a `running` experiment (422
-`invalid_state`, `This run has not started.` otherwise):
-1. Shift the whole calendar back by `run_length_days`:
-   `UPDATE experiments SET start_date = start_date - run_length,
-   planned_end_date = planned_end_date - run_length WHERE id = $1` and the
-   same `- run_length` shift on both date columns of its `allocations`.
-   (`start_date`/`planned_end_date` are outside the frozen-column set, and
-   `allocations` has no trigger, so this is legal.)
-2. Backfill one check-in for every shifted run day that lacks one, valued by
-   the day's true condition so the demo verdict has real signal:
-   `metric_value` = 8 on active days and 3 on blank days for
-   `rating_0_10` / `minutes` / `count` (swapped when
-   `metric_direction = 'lower_better'`), and 1 / 0 (swapped likewise) for
-   `yes_no`; `placebo_guess` = the day's true condition; `note` = NULL.
-3. Respond `200 { "ok": true }`.
+This estimates the same quantity `DEFAULT_WITHIN_SD` assumes (day-to-day spread
+of the metric around its block mean, on the metric's raw stored scale), so it
+drops into `minimumDetectableEffect` unchanged. Do not rescale `yes_no` here: the
+raw 0/1 pooled SD is the same scale as `DEFAULT_WITHIN_SD.yes_no = 0.5`, matching
+the assumed path exactly. (The preview's existing `yes_no` unit labeling is
+unchanged and out of scope, consistent with EPIC 5's note.)
 
-This route exists for tests and local development only. It is not part of
-the product surface, gets no UI, and the gate condition is itself asserted
-by test (section 4).
+**Db read (`experiments.ts`).** Add:
 
-### 2.8 Seed: the demo verdict comes from the engine
+```ts
+export async function measuredWithinSd(
+  db: Db, userId: string, metricType: string, metricName: string
+): Promise<number | null>
+```
 
-`seed.ts` currently inserts hand-authored verdict numbers. Now that the
-engine exists, hand-authored numbers on the staging demo would be exactly
-the manufactured confidence this product exists to kill. Change the seed's
-verdict insert to: build the engine input from the seed's own BLOCKS and
-generated check-ins, call `computeVerdict`, and insert the engine's output
-(all columns, including the new 2.2 ones). Keep the seeded experiment,
-allocations, and check-ins exactly as they are; the near-null data already
-tells the right demo story, and the engine will now say so in its own words.
-Delete the hardcoded `VERDICT_TEXT`/`POWER_NOTE` constants and the static
-numbers. The seed stays idempotent (the existing skip guard is untouched).
+- Query the user's completed history for this exact metric:
 
-### 2.9 Frontend — the reveal and the verdict screen (390px)
+```sql
+SELECT a.experiment_id, a.block_index, c.metric_value
+  FROM experiments e
+  JOIN allocations a ON a.experiment_id = e.id
+  JOIN check_ins   c ON c.experiment_id = e.id
+                    AND c.check_date BETWEEN a.block_start_date AND a.block_end_date
+ WHERE e.user_id = $1
+   AND e.status = 'unblinded'
+   AND e.metric_type = $2
+   AND lower(btrim(e.metric_name)) = lower(btrim($3))
+```
 
-**`Run.tsx`, phase `complete`** (replaces the current pass-through card;
-grep the e2e specs first and keep any asserted `running`-phase strings
-untouched — the `complete` body text is not asserted anywhere today):
-- Heading `Your run is complete`, body
-  `Every block is logged. The schedule stays sealed until you reveal the verdict.`
-- One primary button `Reveal the verdict`. On press: `aria-busy` pressed
-  state with label `Revealing…` within 100ms, disabled against
-  double-submit; call `POST /unblind`; on success navigate to
-  `/experiments/:id/verdict`; on failure show an inline error line
-  (`Check your connection and try again.`) and re-enable. A 422 with the
-  voided message navigates back to the summary.
-- A subordinate `Back to summary` link stays.
+- Group rows into blocks keyed by `${experiment_id}:${block_index}`, coerce
+  `metric_value` to numbers, and call `pooledWithinSd`. Return its result
+  (`number | null`). Matching on `metric_type` AND the case-insensitive, trimmed
+  `metric_name` is what makes it "the same metric I measured before"; voided runs
+  are excluded by the `status = 'unblinded'` filter. Scoped to `user_id`, so no
+  cross-user noise. The query is covered by `experiments_user_id_idx`; it runs
+  only when a metric name is present (see the route) and returns a handful of
+  rows.
 
-**`Run.tsx`, phase `unblinded`** (replaces the bare back-link card): heading
-`Your verdict is ready`, primary link `See the verdict` to
-`/experiments/:id/verdict`, ghost `Back to summary`.
+**`previewSchema` + `previewDesign` (`experiments.ts`).**
+- Extend `previewSchema` with `metric_name: z.string().trim().max(60).optional()`
+  (keep `.strict()`; still optional so existing callers are unaffected).
+- Change `previewDesign(input, measuredWithinSd?: number | null)`:
+  - When `measuredWithinSd` is a finite number, use it and set
+    `noise_source = "measured"`.
+  - Otherwise use `assumedWithinSd(input.metric_type, input.template_id)` (the
+    existing template-or-default logic) and set `noise_source = "assumed"`.
+  - Everything else (MDE, floor, safety, run length) is computed exactly as
+    today; only the SD input and the new field change.
+- Add `noise_source: "measured" | "assumed"` to `PreviewResult`.
 
-**`ExperimentLocked.tsx`** (minimal, status-aware): add an `unblinded`
-branch before the final else: line `This run is finished.` plus a primary
-button `See the verdict` navigating to `/experiments/:id/verdict`. The
-`running`, `voided`, and default (`prepped`) branches are byte-for-byte
-untouched (EPIC 3/4 e2e asserts them).
+**Route (`routes/experiments.ts`).** In the existing `/api/experiments/preview`
+handler, after a successful parse:
 
-**`Verdict.tsx`** (new page). On mount fetch `GET /verdict`. `LoadingCard`
-while loading; designed `ErrorState` with retry on failure. On a 422
-`invalid_state`, redirect to `/experiments/:id` (the summary's status
-affordances take over). On success render, top to bottom:
+```ts
+const measured = parsed.data.metric_name
+  ? await measuredWithinSd(app.db, request.user!.id, parsed.data.metric_type, parsed.data.metric_name)
+  : null;
+return reply.send(previewDesign(parsed.data, measured));
+```
 
-1. Header: h1 `Your verdict`, subhead
-   `{substance_name}. {run_length_days} days, sealed until now.`
-2. **Part one card** (hero): h2 `What the data says`, body =
-   `verdict_text`. Small stat row underneath: `Effect {signed effect} {units}`
-   and `p = {p}` (p to 3 decimals; `p < 0.001` when smaller; the row is
-   omitted entirely on the insufficient-data branch).
-3. **Part two card** (the repeatable moment): h2 `Could you feel it?`, body =
-   `guess_text`. When `guess_days_unsure > 0`, a quiet line:
-   `{U} unsure days sit out of the guess score.`
-4. **The blind line**: when `blind_integrity_flag` and `significant`:
-   `You also guessed the days better than chance. Some of the gap may be expectation rather than the capsule. Weigh the result with that in mind.`
-   When `blind_integrity_flag` and not `significant`:
-   `You guessed the days better than chance, so the blind may have leaked. Treat this run's numbers with extra doubt.`
-   When the flag is false and `guess_days_scored > 0`:
-   `The blind held: your guesses stayed near chance.`
-   (No line when `guess_days_scored = 0`.)
-5. **Adherence line**: `You logged {days_logged} of {run_length_days} days.`
-6. **Power card**: h2 `How much this run could see`, body = `power_note`.
-7. **Schedule table**: h2 `The schedule, unsealed`, the existing
-   `sheet-table reveal-table` markup with headers `Packet` / `What it was` /
-   `Days`, one row per block (`code`, `contents`,
-   `{block_start_date} to {block_end_date}`), in the served order.
-8. Ghost link `Back to summary` to `/experiments/:id`.
+No change to status codes, validation, or the "writes nothing" guarantee.
 
-The two reveal cards carry the visual weight (larger type on `verdict_text`
-and `guess_text` via a couple of new CSS classes); everything below is
-subordinate. No animations, no confetti — the honesty IS the moment.
+### 2.6 Frontend — the formulary home and the noise line (390px)
 
-**Accessibility & mobile (QUALITY BAR §2, §6):** real heading order
-(h1 → h2s), the schedule as a real `<table>`, every link/button
-keyboard-reachable with visible focus and ~44px targets, no horizontal
-scroll at 390px, existing CSS variables for contrast. `aria-busy` on the
-reveal button while pending.
+**`Home.tsx`** (the authed root, rendered by `RootGate`). On mount, fetch
+`GET /api/formulary`.
+- **Loading:** `LoadingCard` inside `Page` (holds the layout; no white flash).
+- **Error:** `ErrorState` with `We could not load your formulary.` /
+  `Check your connection and try again.` / `Try again` retrying the fetch.
+- **Empty (zero cards):** the existing empty-state card, unchanged:
+  heading `Start your first blind test` (VERBATIM — the e2e sign-in helper and
+  landing flow assert it), the existing body, and the `Design a test` primary
+  button to `/design`. Do not reword this state.
+- **Non-empty:** keep the `app-bar` header (brand + sign out) and the greeting.
+  Then:
+  - h1 `Your formulary`.
+  - A row with one primary action `Design a test` (to `/design`) and one
+    subordinate action `Export` — an anchor `<a class="btn btn-ghost"
+    href="/api/formulary/export">Export</a>` (a real same-origin link: the
+    browser sends the session cookie, the attachment downloads, the SPA does not
+    navigate; keyboard-reachable with visible focus, ~44px target).
+  - The list of cards, newest first. Each card is a single keyboard-reachable
+    control (a `<button>` or `<Link>`) with an accessible name, navigating to:
+    `/experiments/:id/verdict` for an `unblinded` run, `/experiments/:id` for a
+    `voided` run.
 
-### 2.10 Screen-only copy (verbatim; the stored verdict strings live in 2.5)
+**Card contents** (all derived from the payload; no recompute):
+- Title: `substance_name`. Subtitle: `metric_name`.
+- **Voided card:** a `Voided` badge and the line
+  `You broke the blind, so this run has no verdict.` (reused verbatim from the
+  server voided message; a factual verdict statement, not empty-state filler). No
+  effect/guess/adherence stats.
+- **Unblinded card:** two short tags plus a stat line.
+  - Effect tag, from `verdict`:
+    - `verdict === null` or `effect_estimate === null` → `Too little data`
+    - `significant === true` → `Beat the blank`
+    - otherwise → `Matched the blank`
+  - Guess tag, from `verdict`:
+    - `guess_days_scored === 0` → `All unsure`
+    - `guesses_beat_chance === true` → `You felt it`
+    - otherwise → `Near a coin flip`
+  - Stat line (omit any part whose value is null):
+    - When an effect exists: `{signed effect} {units}, {p}` where `signed` is
+      `+n`/`n` and `p` is `p = 0.abc` (three decimals) or `p < 0.001` for smaller
+      values (reuse the `signed`/`formatStatP` helpers' behavior from
+      `Verdict.tsx`; duplicating the two tiny helpers is acceptable, or lift them
+      into `components/ui.tsx`).
+    - Guess calibration: `Guessed {guess_days_correct} of {guess_days_scored}
+      days` (omit when `guess_days_scored === 0`).
+    - `Adherence {adherence_pct}%` (omit when `adherence_pct === null`).
+  - A small `Finished {ended_on}` line (fine-print).
+- Voided card fine-print: `Voided {ended_on}`.
 
-Run page, `complete`:
-- Heading: `Your run is complete`
-- Body: `Every block is logged. The schedule stays sealed until you reveal the verdict.`
-- Primary: `Reveal the verdict` (pending label: `Revealing…`)
-- Inline error: `Check your connection and try again.`
-- Ghost link: `Back to summary`
+**Accessibility & mobile (QUALITY BAR §2, §6, §7):** real heading order (h1 →
+card titles as h2 or a semantic list), each card a keyboard-reachable control
+with a visible focus ring and ~44px height, cards stack vertically with no
+horizontal scroll at 390px, one obvious primary action (`Design a test`) with the
+export visibly subordinate, existing CSS variables for contrast.
 
-Run page, `unblinded`:
-- Heading: `Your verdict is ready`
-- Primary: `See the verdict`
-- Ghost link: `Back to summary`
+**`Design.tsx`** (measured-noise line):
+- Add `metricName` to the debounced preview effect's dependency array and send
+  `metric_name: metricName.trim() || undefined` in the `previewDesign` request.
+- In the power card, below the existing power statement, render one line from
+  `preview.noise_source`:
+  - `"measured"` →
+    `This is tuned to the day-to-day noise measured in your past runs of this metric.`
+  - `"assumed"` →
+    `This uses a typical day-to-day noise. Finish a run of this metric to tune it to you.`
+- No other change to the design screen. The MDE number already updates from the
+  preview; this line only names the source.
 
-Locked summary, `unblinded`:
-- Line: `This run is finished.`
-- Primary: `See the verdict`
+### 2.7 Screen-only and file copy (verbatim; sweep before finishing)
 
-Verdict screen:
-- h1: `Your verdict`
-- Subhead: `{substance_name}. {run_length_days} days, sealed until now.`
-- Card headings: `What the data says` / `Could you feel it?` /
-  `How much this run could see` / `The schedule, unsealed`
-- Stat row: `Effect {X} {units}` / `p = {p}`
-- Unsure line: `{U} unsure days sit out of the guess score.`
-- Blind lines: as written in 2.9 item 4.
-- Adherence: `You logged {n} of {m} days.`
-- Table headers: `Packet` / `What it was` / `Days`
-- Back link: `Back to summary`
+Home, empty (UNCHANGED — do not reword):
+- Heading: `Start your first blind test`
+- Primary: `Design a test`
 
-Server messages (all via `errorEnvelope`):
-- Unblind mid-run (`422`): `Your run is still going. Finish every block first.`
-- Unblind/verdict on voided (`422`): `You broke the blind, so this run has no verdict.`
-- Unblind before start (`422`): `This run has not started.`
-- Verdict on a complete-but-sealed run (`422`): `Your run is complete. Reveal the verdict first.`
-- Verdict on any other sealed state (`422`): `Finish the run, then reveal the verdict.`
+Home, formulary:
+- h1: `Your formulary`
+- Primary: `Design a test`
+- Subordinate: `Export`
+- Effect tags: `Beat the blank` / `Matched the blank` / `Too little data`
+- Guess tags: `You felt it` / `Near a coin flip` / `All unsure`
+- Voided badge: `Voided`
+- Voided line: `You broke the blind, so this run has no verdict.`
+- Stat line parts: `Guessed {c} of {s} days` / `Adherence {n}%`
+- Fine-print: `Finished {date}` / `Voided {date}`
+- Loading/error: `We could not load your formulary.` /
+  `Check your connection and try again.` / `Try again`
 
-Loading/error states reuse `LoadingCard` and `ErrorState` with the standard
-copy (`We could not load this page.` / `Check your connection and try
-again.` / `Try again`). Run the mechanical copy sweep (section 4) over every
-string above and every string in 2.5 before finishing.
+Design, noise line:
+- Measured: `This is tuned to the day-to-day noise measured in your past runs of this metric.`
+- Assumed: `This uses a typical day-to-day noise. Finish a run of this metric to tune it to you.`
+
+Export file:
+- Filename: `blind-keeper-export.json`
+
+Run the mechanical copy sweep over every string above and every new string in
+the code: search for `—` and `–`, the banned vocabulary (`seamlessly`,
+`effortlessly`, `unlock`, `elevate`, `empower`, `leverage`, `robust`, `dive in`,
+and kin), and negative empty-state phrasing (`You don't have`, `No … yet`,
+`Nothing … here`, `Unable to`, `Something went wrong`). The honest verdict tags
+above (`Matched the blank`, `Too little data`) are factual result statements, not
+empty-state filler, and stay as written.
+
+### 2.8 README (QUALITY BAR §9)
+
+`README.md` currently says "Daily check-ins and the verdict engine arrive in
+later releases," which is now false (EPIC 4/5 shipped, and this EPIC completes
+the loop). Update the "what this repository has" paragraph to describe the whole
+delivered product in plain language: design a blinded run, prep capsules, log a
+daily check-in with a placebo guess, get a deterministic verdict on unblinding
+day, and keep every finished run in a personal formulary you can export. Keep the
+run/build/test commands (verified against the compose files) and the no-factory
+-internals rule. This is a small accuracy edit, not a rewrite.
 
 ---
 
 ## 3. Ordered task list (with acceptance criteria)
 
-1. **Migration `0004`.** Add the six verdict columns per 2.2.
-   - *AC:* migrations apply cleanly on a fresh database; `migrations.test`
-     passes; existing verdict inserts (seed) still work once updated.
+1. **Measured-noise engine + power wiring.** Add `pooledWithinSd` and
+   `MIN_NOISE_DF` to `power.ts`; add `measuredWithinSd` to `experiments.ts`;
+   extend `previewSchema` with `metric_name`; thread the measured SD through
+   `previewDesign` and add `noise_source`; wire the preview route to look it up
+   (sections 2.5).
+   - *AC:* `pooledWithinSd` returns the pooled within-block SD for known vectors,
+     skips blocks with fewer than two values, and returns `null` when
+     `df < MIN_NOISE_DF` or the spread is zero (unit test).
+   - *AC:* with no completed history for a metric, the preview returns
+     `noise_source: "assumed"` and the same MDE as today (the existing preview
+     test's `mde` value is unchanged).
+   - *AC:* after the same user completes an `unblinded` run of a metric, a
+     preview with that `metric_name` returns `noise_source: "measured"` and an
+     MDE computed from the measured SD; another user's history does not change
+     this user's preview; a metric with only `voided` history stays `"assumed"`.
 
-2. **Verdict engine.** Build `server/src/verdict.ts` per 2.4–2.5: exact
-   permutation test, exact binomial test, adherence, blind-integrity flag,
-   power note, verbatim text templates, formatting helpers.
-   - *AC:* `permutationTest` reproduces the hand-computed vectors in section
-     4 exactly, including the six-block floor case where the best possible
-     outcome yields p = 0.05 and never less.
-   - *AC:* `binomialTestVsChance` matches exact values (section 4) and
-     returns null-safe output for zero scored days.
-   - *AC:* `computeVerdict` handles: full data; blocks with missing days;
-     one condition entirely unlogged (insufficient-data branch, null effect
-     fields, honest text); all-unsure guesses; `yes_no` percentage-point
-     conversion; `lower_better` orientation. All deterministic: same input,
-     same output, no RNG.
-   - *AC:* every produced string matches 2.5 verbatim and passes the copy
-     sweep.
+2. **Formulary list, server.** Add `listFormulary` and the `GET /api/formulary`
+   route (sections 2.3, 2.2).
+   - *AC:* returns the user's `unblinded` and `voided` runs as cards, newest
+     first, each with substance, metric, `ended_on`, and (for unblinded) the
+     verdict subset with `significant`/`guesses_beat_chance` derived exactly as
+     `rowToVerdictNumbers` does; a voided card has `verdict: null`.
+   - *AC:* `prepped`/`running` runs never appear; the list is capped at
+     `FORMULARY_LIMIT`.
+   - *AC:* unauthenticated → 401; another user's runs are never in the response.
 
-3. **Unblind + verdict read, server.** Add `ensureVerdict`,
-   `unblindExperiment`, `getVerdictView` and the two routes per 2.6.
-   - *AC:* on a `running` experiment past `planned_end_date`, `POST /unblind`
-     returns 200, sets `status = 'unblinded'`, and stores exactly one
-     `verdicts` row; a second POST returns 200 with the same stored result
-     and an unchanged `computed_at`.
-   - *AC:* `POST /unblind` mid-run → 422; on `prepped` → 422; on `voided` →
-     422; unauthenticated → 401; another user's id and non-uuid ids → 404.
-     `GET /verdict` mirrors the matrix and serves the stored view only when
-     `unblinded`.
-   - *AC:* the verdict view carries the schedule (`blocks`) and every field
-     of 2.6's shape with numeric types as numbers.
-   - *AC:* no network call occurs anywhere in the unblind path (fetch-stub
-     test, section 4), and no new dependency was added.
+3. **Export, server.** Add `buildExport` and the `GET /api/formulary/export`
+   route with the attachment headers (sections 2.4, 2.2).
+   - *AC:* returns valid JSON with `Content-Disposition: attachment;
+     filename="blind-keeper-export.json"`; `runs` carries the user's finished
+     runs with the stored verdict (unblinded) or `null` (voided), the unsealed
+     `schedule`, and the daily `check_ins`.
+   - *AC:* a `prepped`/`running` run and its allocation never appear in the
+     export.
+   - *AC:* unauthenticated → 401; only the requesting user's data is reachable
+     (another user's ids, runs, and check-ins never appear).
 
-4. **Dev completion route.** Add the console-transport-only
-   `POST /api/experiments/:id/complete-run` per 2.7.
-   - *AC:* with the console transport, a running experiment's dates shift
-     back one full run length and every run day gains a condition-valued
-     check-in with a true-condition guess; the run then reads `phase:
-     "complete"` on `GET /today`. With the central transport the route does
-     not exist (404).
+4. **Register routes.** Register `registerFormularyRoutes` in `app.ts`.
+   - *AC:* both routes are reachable under `/api/formulary` and
+     `/api/formulary/export`; the app boots and existing route tests still pass.
 
-5. **Seed uses the engine.** Rework the seed's verdict insert per 2.8.
-   - *AC:* with `SEED_DEMO=true`, the stored demo verdict equals
-     `computeVerdict` run over the seeded allocations and check-ins
-     (recompute in the test and compare field by field); the hardcoded
-     verdict constants are gone; the seed remains idempotent.
+5. **API client.** Add `getFormulary` + `FormularyCard`/`FormularyView` types,
+   `metric_name` on `PreviewInput`, `noise_source` on `Preview`, and the export
+   path constant to `api.ts`.
+   - *AC:* `getFormulary` calls `/api/formulary` with `credentials:
+     "same-origin"` and surfaces `ApiRequestError` on non-OK, matching the
+     existing client.
 
-6. **API client.** Add `unblind`, `getVerdict`, and `VerdictView` types to
-   `api.ts`.
-   - *AC:* both call the correct paths with `credentials: "same-origin"` and
-     surface `ApiRequestError` on non-OK, matching the existing client.
+6. **Formulary home.** Rework `Home.tsx` to fetch and render the formulary with
+   loading/error/empty/non-empty states and the export link; keep the empty-state
+   heading verbatim (section 2.6).
+   - *AC:* at 390px, a user with finished runs sees `Your formulary`, one card per
+     finished run with the correct tags/stats, a `Design a test` primary action,
+     and an `Export` link to `/api/formulary/export`; no horizontal scroll;
+     keyboard reaches every card and action with visible focus.
+   - *AC:* a brand-new user (no finished runs) sees the `Start your first blind
+     test` empty state with the `Design a test` action; the existing sign-in and
+     landing e2e still pass unmodified.
+   - *AC:* tapping an unblinded card lands on its verdict; tapping a voided card
+     lands on its summary (which reads `This run is voided.`).
 
-7. **Verdict screen + wiring.** Build `Verdict.tsx`, route it, and rework
-   the `complete`/`unblinded` phases in `Run.tsx` and the `unblinded` branch
-   in `ExperimentLocked.tsx` per 2.9.
-   - *AC:* at 390px the verdict screen shows, in order: the two-part reveal
-     (both cards), the unsure line when applicable, the blind line, the
-     adherence line, the power card, and the unsealed schedule table; no
-     horizontal scroll; keyboard reaches everything with visible focus.
-   - *AC:* the run page's `complete` phase shows `Reveal the verdict`, gives
-     feedback within 100ms, cannot double-submit, and lands on the verdict
-     screen; the `unblinded` phase and the locked summary link to it.
-   - *AC:* designed loading and error states are present on the verdict
-     screen; a sealed run's 422 redirects to the summary instead of showing
-     a broken page.
-   - *AC:* EPIC 3/4 e2e specs (`prep.spec`, `run.spec`, `break-blind`
-     coverage) still pass unmodified except where a spec asserted the old
-     `complete`-phase body (none do today; verify by grep before editing).
+7. **Design noise line.** Send `metric_name` in the preview request and render
+   the measured/assumed line in `Design.tsx` (section 2.6).
+   - *AC:* after completing a run of a metric, opening `/design` and entering that
+     metric name shows the measured line; with no such history the assumed line
+     shows. No other design-screen behavior changes.
 
-8. **Tests + mechanical copy sweep.** Everything in section 4; sweep every
-   string in 2.5 and 2.10.
-   - *AC:* all listed tests pass in the foreground; the sweep finds no `—` /
-     `–`, no banned vocabulary, and no negative empty-state phrasing in any
-     shipped string.
+8. **README + copy sweep.** Update the README paragraph (section 2.8) and run the
+   mechanical copy sweep over every new/edited string.
+   - *AC:* the README accurately describes the shipped loop including the
+     formulary and export; the sweep finds no `—`/`–`, no banned vocabulary, and
+     no negative empty-state phrasing in any shipped string.
 
 ---
 
@@ -639,113 +589,93 @@ string above and every string in 2.5 before finishing.
 
 Automated, run in the foreground to completion before writing `result.json`.
 
-**Engine unit tests (Vitest, pure — no app, no DB): `verdict-engine.test.ts` (new).**
-- Permutation, floor case: 6 blocks, 3 active, active means `[8, 8, 8]`,
-  blank `[2, 2, 2]`, `higher_better` → effect `6`, p exactly `1/20 = 0.05`.
-  Assert no smaller p is possible: every one of the 20 labelings' p values
-  is `>= 0.05`. → *AC task 2, planner criterion 2.*
-- Permutation, hand-computed mixed case: block means `[5, 6, 7]` active,
-  `[4, 5, 6]` blank, `higher_better` → effect `1`, p = `5/20 = 0.25`
-  (labelings with active-sum >= 18: exactly 5 of 20). Same data with
-  `lower_better` → oriented effect `-1`, p = `19/20 = 0.95`. → *AC task 2.*
-- Permutation, no signal: all six block means equal → p = `1.0`. → *AC 2.*
-- Binomial: `P(X >= 3 | n=6)` = `42/64 = 0.65625` exact;
-  `P(X >= 17 | n=21)` ≈ `0.0036` (assert within 1e-4); `P(X >= 0 | n=0)` →
-  null branch. → *AC task 2, planner criterion 2.*
-- `computeVerdict` end to end on synthetic inputs: adherence rounding;
-  a block with zero check-ins is excluded and `p_value_floor` reflects the
-  included blocks; one condition unlogged → null effect fields + the
-  insufficient-data `verdict_text`; all-unsure → `guess_days_scored = 0`,
-  null accuracy/p, flag false, the all-unsure `guess_text`; `yes_no` effect
-  and MDE reported ×100 in `percentage points`; `lower_better` flips the
-  `higher|lower` word; text output byte-equal to the 2.5 templates for one
-  case per branch. → *AC task 2.*
-- `luckPhrase` cases: `0.05` → `about 5% of the time`, `0.0036` →
-  `about 0.4% of the time`, `0.0004` → `fewer than 1 time in 1000`. → *AC 2.*
+**Unit (Vitest, pure): `power.test.ts` (extend).**
+- `pooledWithinSd`: for blocks `[[6,8],[2,4]]` the pooled SD is
+  `sqrt((2+2)/2) = sqrt(2) ≈ 1.4142` (assert within 1e-6); a block of length < 2
+  is skipped; `df` below `MIN_NOISE_DF` → `null`; all-equal values (`ss = 0`) →
+  `null`. → *AC task 1.*
 
-**Route tests (Vitest, `fastify.inject` + PGlite per `helpers.ts`; drive the
-real flow — lock via `POST /api/experiments`, start via `confirm-prep`, log
-check-ins via `POST /checkins`, then shift dates directly in the DB
-(`start_date`/`planned_end_date` and allocation dates are not frozen) to
-make the run complete): `unblind.test.ts` (new).**
-- Happy path: complete run with a full set of check-ins → `POST /unblind`
-  200; DB shows `status = 'unblinded'` and exactly one `verdicts` row; the
-  response carries the 2.6 shape with numbers as numbers and `blocks`
-  matching the stored allocations in order. → *AC task 3, planner criterion 1.*
-- Compute-once: a second `POST /unblind` → 200, identical verdict,
-  `computed_at` unchanged, still one row. `GET /verdict` returns the same
-  stored view. → *AC task 3, planner criterion 1.*
-- Gating matrix: mid-run unblind → 422 `invalid_state`; `prepped` → 422;
-  `voided` → 422 with the no-verdict message and NO verdicts row written;
-  `GET /verdict` on each sealed state → 422 with the 2.10 message; unauth →
-  401; other user → 404; non-uuid → 404. → *AC task 3.*
-- No-network proof: stub `globalThis.fetch` to throw, run the full
-  lock → confirm → shift → unblind → get-verdict path, assert it succeeds
-  (nothing in the verdict path touches the network). → *AC task 3, planner
-  criterion 5.*
-- Immutability coexistence: after unblinding, a direct UPDATE of a frozen
-  column still raises (the `0002` trigger outlived the status flip). →
-  *DB seal.*
-- `dev-complete-run` behavior: with the console transport (the test
-  default), `POST /complete-run` on a running experiment → dates shifted,
-  every run day has a check-in, `GET /today` reads `phase: "complete"`, and
-  the subsequent unblind yields a significant effect with all guesses
-  correct (the 2.7 values guarantee it). Then
-  `buildTestApp({ MAIL_TRANSPORT: "central" })` (valid in test env; the
-  `INTERNAL_SERVICE_KEY` requirement is production-only) and assert the
-  route answers 404 there, proving the console-only gate. → *AC task 4.*
-- `allocation-never-serialized.test` (extend): assert `GET /today`, `GET
-  /:id`, and the check-in response on a COMPLETE (but sealed) run still
-  carry no condition, no non-today code, no block date; document and assert
-  that `POST /unblind` / `GET /verdict` reveal only after
-  `status = 'unblinded'`. → *the trust invariant, rule 2.1.*
-- `seed.test` (extend): with `SEED_DEMO=true`, read the demo verdict row,
-  recompute with `computeVerdict` over the seeded data, and compare every
-  stored field; assert the demo `GET /verdict` (signed in as the demo user
-  via the console flow, or via direct view call) serves it. → *AC task 5.*
-- `migrations.test` (existing): passes with `0004` in place. → *AC task 1.*
+**Route (Vitest, `fastify.inject` + PGlite per `helpers.ts`): `formulary.test.ts`
+(new).** Drive the real flow: `signIn`, lock via `POST /api/experiments`, start
+via `confirm-prep`, and reach a completed run via `POST
+/api/experiments/:id/complete-run` (console transport is on in tests) then `POST
+/unblind`; produce a voided run via `POST /break-blind`; leave a third run
+`running`.
+- List happy path: `GET /formulary` returns the unblinded and voided runs newest
+  first; the unblinded card carries the verdict subset with `significant` and
+  `guesses_beat_chance` matching the stored `GET /verdict` values to the digit;
+  the voided card has `verdict: null` and `status: "voided"`; the running run is
+  absent. → *AC task 2, planner criterion 1.*
+- Export happy path: `GET /formulary/export` returns 200 with the attachment
+  `Content-Disposition`; the parsed body's `runs` contains the unblinded run with
+  its full stored verdict, an unsealed `schedule` (a `Blank` row present), and its
+  `check_ins`; the voided run with `verdict: null`; the running run and any
+  allocation of it are absent. → *AC task 3, planner criterion 2.*
+- Isolation: sign in a second user with their own finished run; `GET /formulary`
+  and `GET /formulary/export` as each user return only that user's ids; neither
+  contains the other's substance name, run ids, or check-ins. → *AC tasks 2 & 3,
+  planner criterion 4.*
+- Auth: unauthenticated `GET /formulary` and `GET /formulary/export` → 401. →
+  *AC tasks 2 & 3, planner criterion 4.*
+- `allocation-never-serialized.test` (extend): a sealed (`running`) run appears in
+  neither `GET /formulary` nor `GET /formulary/export`, and no condition/block
+  date for it crosses the wire. → *the trust invariant, section 2.1 rule 2.*
 
-**Frontend / e2e (Playwright, 390px project): `verdict.spec.ts` (new).**
-- The signature moment, end to end: `startRun(page)` (existing helper), then
-  `page.request.post` to `/api/experiments/:id/complete-run` (console
-  transport is on in e2e), reload `/experiments/:id/run` → assert the
-  `Your run is complete` card and `Reveal the verdict`; click it → land on
-  `/experiments/:id/verdict`; assert h1 `Your verdict`, both card headings
-  (`What the data says`, `Could you feel it?`), the `You felt it.` opening
-  (the 2.7 backfill guarantees that branch), the adherence line, the power
-  card, and the schedule table with a `Blank` row; no horizontal scroll
-  anywhere on the page. → *AC task 7, planner criteria 3 and 4.*
-- Persistence and wiring: reload the verdict URL directly → same content
-  (stored verdict, no recompute UI); go to `/experiments/:id` → assert
-  `This run is finished.` and `See the verdict` navigates back to the
-  verdict. → *AC task 7.*
-- Sealed-run guard: on a freshly started (running) experiment, navigate
-  straight to `/experiments/:id/verdict` → assert redirect to the summary,
-  not an error dump. → *AC task 7.*
+**Route (Vitest): `preview.test.ts` (extend).**
+- Existing assumed case still returns `mde: 1.4` and now also
+  `noise_source: "assumed"`. → *AC task 1.*
+- Measured case: as one user, complete an `unblinded` run of metric
+  `"Afternoon focus"` (`rating_0_10`) with check-ins, then `POST /preview` with
+  `metric_name: "Afternoon focus"` → `noise_source: "measured"` and an `mde`
+  equal to `previewDesign` fed the `measuredWithinSd`/`pooledWithinSd` value
+  (recompute in the test and compare). → *AC task 1, planner criterion 3.*
+- Voided-only history for a metric → `noise_source: "assumed"`; a second user's
+  completed history does not flip user A's preview to `"measured"`. → *AC task 1,
+  planner criteria 3 & 4.*
+
+**Frontend / e2e (Playwright, 390px project): `formulary.spec.ts` (new).**
+- Empty state: a fresh user at `/` sees `Start your first blind test` and
+  `Design a test` (guards the preserved heading). → *AC task 6.*
+- Finished run appears: `startRun(page)`, then `page.request.post(
+  /api/experiments/:id/complete-run)` and `page.request.post(
+  /api/experiments/:id/unblind)`; go to `/` → assert `Your formulary`, a card
+  with the substance name, and that clicking it lands on
+  `/experiments/:id/verdict`; assert the `Export` link points at
+  `/api/formulary/export`; no horizontal scroll. → *AC task 6, planner criteria 1
+  & 2.*
+- Voided run appears: `startRun`, break the blind via the UI (or
+  `page.request.post(/break-blind)`), go to `/` → a `Voided` card whose click
+  lands on `/experiments/:id` reading `This run is voided.` → *AC task 6, planner
+  criterion 1.*
+- Measured-noise line: after completing and unblinding a run for metric
+  `Afternoon focus`, open `/design`, fill the metric with `Afternoon focus`, and
+  assert the measured line appears; on a fresh design (different metric) the
+  assumed line appears. → *AC task 7, planner criterion 3.*
 
 **Non-automated verification (record in `result.json` summary):**
-- Mechanical copy sweep over every string added or edited (`verdict.ts`
-  templates, `Verdict.tsx`, `Run.tsx`, `ExperimentLocked.tsx`, `api.ts`
-  messages): search for `—`, `–`, the banned vocabulary, and negative
-  empty-state phrasing. Fix every hit. → *copy quality.*
+- Mechanical copy sweep over every string added or edited (`Home.tsx`,
+  `Design.tsx`, `formulary.ts`, `api.ts`, `README.md`): search for `—`, `–`, the
+  banned vocabulary, and negative empty-state phrasing. Fix every hit. → *copy
+  quality.*
 
 ---
 
 ## 5. Definition of done
 
-All acceptance criteria in §3 are met and all §4 tests pass. A user whose
-run has passed its last day opens the run page, presses `Reveal the
-verdict`, and lands on a 390px-legible two-part reveal: what the data says
-about the supplement (effect estimate in the metric's own units with an
-exact permutation p-value) and whether they could feel it (guess accuracy
-against an exact binomial chance baseline, unsure days counted and set
-aside), plus adherence, the blind-integrity reading, an honest power caveat
-that reads a null as underpowered and never as proven-no-effect, and the
-unsealed schedule. The verdict is computed exactly once by a pure,
-deterministic, LLM-free, network-free engine, stored, and served unchanged
-on every later visit; a voided run can never obtain one, and sealed runs
-still leak nothing. The staging demo's verdict is now a true engine output
-over its seeded data. Nothing from the Non-Goals is built: no LLM narrative,
-no Bayesian comparison, no sharing, no formulary, no per-day overlay chart,
-no recompute path. The copy sweep is clean. `EPIC_SPEC.md` (this file) is
-the only artifact this task leaves; the implementer executes it.
+All acceptance criteria in §3 are met and all §4 tests pass in the foreground. A
+returning user opens the app and sees a personal formulary: one card per finished
+run, newest first, each showing the substance, the metric, whether it beat the
+blank, whether they could feel it, and their adherence, with voided runs present
+and marked voided. Tapping a card opens its full verdict (unblinded) or its
+summary (voided). One tap on `Export` downloads a portable JSON file of the
+user's own finished runs, verdicts, unsealed schedules, and daily check-ins, and
+no other user's data is reachable from either route (proven by test). When the
+user designs a new run for a metric they have already completed, the power
+statement uses their own measured day-to-day noise and says so; with no history
+it uses the stated assumption and says that instead. Every formulary number is
+the stored engine output, unchanged; nothing recomputes or re-judges. Sealed,
+in-progress runs never appear in the formulary or the export. Nothing from the
+Non-Goals is built: no public commons, no cross-user aggregation, no sharing, no
+new verdict math, no migration, no CSV, no demo-seed changes. The README is
+accurate for the shipped loop, and the copy sweep is clean. `EPIC_SPEC.md` (this
+file) is the only artifact this task leaves; the implementer executes it.

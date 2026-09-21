@@ -45,3 +45,26 @@ export function minimumDetectableEffect(input: {
   const seDiff = seBlockMean * Math.sqrt(1 / input.numActive + 1 / input.numBlank);
   return Z * seDiff;
 }
+
+export const MIN_NOISE_DF = 4;
+
+/**
+ * Pooled within-block standard deviation across completed blocks: the user's
+ * measured day-to-day noise for a metric. `blocks` is one array of daily metric
+ * values per block that has data. Blocks with fewer than two values carry no
+ * within-block deviation and are skipped. Returns null when the pooled residual
+ * degrees of freedom fall below MIN_NOISE_DF or the spread is zero, so a flimsy
+ * or degenerate history falls back to the stated assumption.
+ */
+export function pooledWithinSd(blocks: number[][]): number | null {
+  let ss = 0;
+  let df = 0;
+  for (const values of blocks) {
+    if (values.length < 2) continue;
+    const m = values.reduce((s, v) => s + v, 0) / values.length;
+    for (const v of values) ss += (v - m) ** 2;
+    df += values.length - 1;
+  }
+  if (df < MIN_NOISE_DF || ss <= 0) return null;
+  return Math.sqrt(ss / df);
+}

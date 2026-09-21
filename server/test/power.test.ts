@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { combinations, minimumDetectableEffect, pValueFloor } from "../src/power.js";
+import {
+  combinations,
+  minimumDetectableEffect,
+  MIN_NOISE_DF,
+  pooledWithinSd,
+  pValueFloor,
+} from "../src/power.js";
 
 describe("combinations", () => {
   it("uses exact integer arithmetic", () => {
@@ -52,5 +58,36 @@ describe("minimumDetectableEffect", () => {
     const short = minimumDetectableEffect({ assumedWithinSd: 1.5, blockLengthDays: 5, numActive: 3, numBlank: 3 });
     const long = minimumDetectableEffect({ assumedWithinSd: 1.5, blockLengthDays: 10, numActive: 3, numBlank: 3 });
     expect(long).toBeLessThan(short);
+  });
+});
+
+describe("pooledWithinSd", () => {
+  it("returns the pooled within-block SD for known vectors", () => {
+    // Five two-value blocks, each SS = 2, df = 1: pooled SD = sqrt(10 / 5).
+    expect(pooledWithinSd([[6, 8], [2, 4], [1, 3], [9, 11], [0, 2]])).toBeCloseTo(
+      Math.sqrt(2),
+      6
+    );
+  });
+
+  it("skips a block with fewer than two values", () => {
+    // The singleton adds no deviation and no df, so the result matches the same
+    // vectors without it.
+    const withSingleton = pooledWithinSd([[6, 8], [5], [2, 4], [1, 3], [9, 11], [0, 2]]);
+    const withoutSingleton = pooledWithinSd([[6, 8], [2, 4], [1, 3], [9, 11], [0, 2]]);
+    expect(withSingleton).not.toBeNull();
+    expect(withSingleton).toBeCloseTo(withoutSingleton as number, 12);
+  });
+
+  it("returns null when the pooled df falls below MIN_NOISE_DF", () => {
+    expect(MIN_NOISE_DF).toBe(4);
+    // Two two-value blocks give df = 2, under the floor of 4.
+    expect(pooledWithinSd([[6, 8], [2, 4]])).toBeNull();
+    // A single two-value block gives df = 1.
+    expect(pooledWithinSd([[6, 8]])).toBeNull();
+  });
+
+  it("returns null when every value is equal (zero spread)", () => {
+    expect(pooledWithinSd([[5, 5, 5], [5, 5, 5], [5, 5, 5]])).toBeNull();
   });
 });
