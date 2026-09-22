@@ -222,6 +222,35 @@ describe("confirm-ready", () => {
     expect(cross.statusCode).toBe(404);
   });
 
+  it("seals the fill map once the run is running", async () => {
+    const id = await lockExperiment(ctx, cookie);
+
+    // While prepped, the map is served in full.
+    const prepped = await ctx.app.inject({ method: "GET", url: `/api/experiments/${id}/prep`, headers: { cookie } });
+    expect(prepped.statusCode).toBe(200);
+    expect((prepped.json() as { packets: unknown[] }).packets).toHaveLength(N);
+
+    const codes = (
+      await ctx.db.query<{ code: string }>(`SELECT code FROM allocations WHERE experiment_id = $1`, [id])
+    ).map((r) => r.code);
+
+    // Start the run, then re-read prep.
+    const confirm = await ctx.app.inject({ method: "POST", url: `/api/experiments/${id}/confirm-prep`, headers: { cookie } });
+    expect(confirm.statusCode).toBe(200);
+
+    const sealed = await ctx.app.inject({ method: "GET", url: `/api/experiments/${id}/prep`, headers: { cookie } });
+    expect(sealed.statusCode).toBe(200);
+    const body = sealed.json() as { status: string; batches: unknown[]; packets: unknown[] };
+    expect(body.status).toBe("running");
+    // The one-time fill map is gone: no batches, no packets, no codes on the wire.
+    expect(body.batches).toEqual([]);
+    expect(body.packets).toEqual([]);
+    for (const code of codes) expect(sealed.body).not.toContain(code);
+    expect(sealed.body).not.toContain("Batch 1");
+    expect(sealed.body).not.toContain("Batch 2");
+    expect(sealed.body).not.toContain("Blank");
+  });
+
   it("keeps the design sealed after confirm-ready", async () => {
     const id = await lockExperiment(ctx, cookie);
     const res = await ctx.app.inject({ method: "POST", url: `/api/experiments/${id}/confirm-prep`, headers: { cookie } });

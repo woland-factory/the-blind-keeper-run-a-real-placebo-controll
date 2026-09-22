@@ -84,9 +84,9 @@ export function Prep() {
   }, [fetchPrep]);
 
   // A run that already started (here or on another device) is a first success
-  // too, so clear the guided walk when we land on a running run.
+  // too, so clear the guided walk when we land on a run past prep.
   useEffect(() => {
-    if (load.status === "ready" && load.prep.status === "running") {
+    if (load.status === "ready" && load.prep.status !== "prepped") {
       markWalkDone();
     }
   }, [load]);
@@ -154,8 +154,9 @@ export function Prep() {
     );
   }
 
-  // Opened after the run already started: do not re-enter prep as if unstarted.
-  if (load.prep.status === "running") {
+  // Opened after the run already started: the fill map is sealed for good, so
+  // do not re-enter prep as if unstarted.
+  if (load.prep.status !== "prepped") {
     return (
       <StartedState
         id={id}

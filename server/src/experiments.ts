@@ -374,8 +374,18 @@ interface AllocationRow {
 
 /**
  * Owner-scoped, deterministic, blind-safe prep read model. A miss returns null
- * so the route answers 404 without leaking existence. The derivation uses no
- * read-time randomness, so the display is stable across reloads:
+ * so the route answers 404 without leaking existence.
+ *
+ * The fill map (which code sits in which batch, and which batch holds the
+ * substance) is a ONE-TIME assembly aid, served only while status = 'prepped'.
+ * The moment the run starts it is sealed for good: re-serving it would let a
+ * running user pair today's code (from /today) with its batch and read off any
+ * day's condition, defeating the blind without the one honest unblind path
+ * (break-blind, which voids the run and records the reveal). A non-prepped run
+ * therefore gets a sealed view with no batches and no packets.
+ *
+ * While prepped, the derivation uses no read-time randomness, so the display is
+ * stable across reloads:
  *  - Batch 1 is every code whose condition equals block 0's condition. Because
  *    the condition vector was CSPRNG-shuffled at lock, block 0 is active about
  *    half the time, so which batch holds the substance is already randomized.
@@ -397,6 +407,20 @@ export async function getPrep(db: Db, userId: string, id: string): Promise<PrepV
   );
   if (expRows.length === 0) return null;
   const exp = expRows[0];
+
+  // Sealed once the run has started. No codes, no batch-to-contents link.
+  if (exp.status !== "prepped") {
+    return {
+      id: exp.id,
+      status: exp.status,
+      substance_name: exp.substance_name,
+      block_length_days: exp.block_length_days,
+      num_blocks: exp.num_blocks,
+      capsules_per_code: exp.block_length_days,
+      batches: [],
+      packets: [],
+    };
+  }
 
   const allocations = await db.query<AllocationRow>(
     `SELECT block_index, code, condition

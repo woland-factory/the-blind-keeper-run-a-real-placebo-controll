@@ -94,9 +94,10 @@ export async function registerExperimentRoutes(app: FastifyInstance): Promise<vo
     }
   );
 
-  // Blind-safe prep read: codes and neutral batch tokens only, no schedule.
-  // A read, so the global limiter is enough. Allowed once the codes exist
-  // (prepped and running); it does not gate on status.
+  // Blind-safe prep read: the fill map (codes + neutral batch tokens) only
+  // while status = 'prepped'. Once the run starts, getPrep seals it (no codes,
+  // no batches), so a running user cannot re-read the map to defeat the blind.
+  // A read, so the global limiter is enough.
   app.get(
     "/api/experiments/:id/prep",
     { preHandler: requireAuth },

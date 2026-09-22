@@ -129,6 +129,14 @@ describe("allocations are never serialized to a client", () => {
       await ctx.db.query<{ code: string }>(`SELECT code FROM allocations WHERE experiment_id = $1`, [id])
     ).map((r) => r.code);
 
+    // While prepped, GET .../prep serves the fill map: it carries the codes (the
+    // user needs them to label packets) plus the batch-to-contents link, but no
+    // condition word, no block_index, and no date, so the code-to-day schedule
+    // stays sealed.
+    const prepBefore = await ctx.app.inject({ method: "GET", url: `/api/experiments/${id}/prep`, headers: { cookie } });
+    expect(prepBefore.statusCode).toBe(200);
+    for (const code of codes) expect(prepBefore.body).toContain(code);
+
     const confirm = await ctx.app.inject({
       method: "POST",
       url: `/api/experiments/${id}/confirm-prep`,
@@ -150,18 +158,26 @@ describe("allocations are never serialized to a client", () => {
       expect(body).not.toContain("block_end_date");
     }
 
-    // GET .../prep is the one intentional exception: it carries the codes (the
-    // user needs them to label packets) but still no condition word, no
-    // block_index, and no date. That is what keeps the code-to-day schedule
-    // sealed.
+    // Once the run is running, GET .../prep is SEALED: the fill map is a one-time
+    // assembly aid, never re-displayed. Combined with /today's daily code it would
+    // otherwise let a blind user read off any day's condition. The response still
+    // answers 200 (so the client can show "already going") but carries no code, no
+    // batch-to-contents link, and no schedule.
     const prep = await ctx.app.inject({ method: "GET", url: `/api/experiments/${id}/prep`, headers: { cookie } });
     expect(prep.statusCode).toBe(200);
     const prepBody = prep.body;
-    // It does carry the codes.
-    for (const code of codes) expect(prepBody).toContain(code);
-    // It never carries a condition label, a block_index, or a date.
+    const prepJson = prep.json() as { status: string; batches: unknown[]; packets: unknown[] };
+    expect(prepJson.status).toBe("running");
+    expect(prepJson.batches).toEqual([]);
+    expect(prepJson.packets).toEqual([]);
+    // No code survives, so today's code can never be paired to a batch.
+    for (const code of codes) expect(prepBody).not.toContain(code);
+    // And no condition label, block_index, batch-to-contents link, or date.
     expect(prepBody).not.toContain("active");
     expect(prepBody.toLowerCase()).not.toContain("placebo");
+    expect(prepBody).not.toContain("Blank");
+    expect(prepBody).not.toContain("Batch 1");
+    expect(prepBody).not.toContain("Batch 2");
     expect(prepBody).not.toContain("condition");
     expect(prepBody).not.toContain("block_index");
     expect(prepBody).not.toContain("block_start_date");
