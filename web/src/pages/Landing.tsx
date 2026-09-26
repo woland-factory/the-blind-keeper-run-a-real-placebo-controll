@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { requestMagicLink } from "../api.js";
+import { ApiRequestError, requestMagicLink } from "../api.js";
 import { Page } from "../components/ui.js";
 
 export function Landing() {
@@ -17,8 +17,12 @@ export function Landing() {
     try {
       await requestMagicLink(email);
       navigate("/auth/check-email", { state: { email } });
-    } catch {
-      setError("Check your connection and try again.");
+    } catch (err) {
+      // The server tells the user what went wrong (like a bad email). Only a
+      // real network failure gets the connection message.
+      setError(
+        err instanceof ApiRequestError ? err.message : "Check your connection and try again."
+      );
       setSubmitting(false);
     }
   }

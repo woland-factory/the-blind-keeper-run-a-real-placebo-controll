@@ -19,4 +19,15 @@ test.describe("landing", () => {
     );
     expect(overflow).toBe(true);
   });
+
+  test("shows the server's validation message for a malformed email", async ({ page }) => {
+    await page.goto("/");
+
+    await page.getByLabel("Email").fill("not-an-email");
+    await page.getByRole("button", { name: "Send my sign-in link" }).click();
+
+    // The error names the real cause, not a connection problem.
+    const alert = page.getByRole("alert");
+    await expect(alert).toHaveText("Enter a valid email address.");
+  });
 });
